@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"fmt"
+	"io/ioutil"
 	"os"
 
+	e "github.com/rami3l/golox/errors"
 	"github.com/rami3l/golox/vm"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -27,9 +28,9 @@ func App() (app *cobra.Command) {
 			verbosityLvl, _ = logrus.ParseLevel(defaultVerbosityStr)
 		}
 		logrus.SetLevel(verbosityLvl)
-		logrus.SetFormatter(&easy.Formatter{LogFormat: "DBG %msg%\n"})
+		logrus.SetFormatter(&easy.Formatter{LogFormat: "%lvl% %msg%\n"})
 
-		if err := appMain(); err != nil {
+		if err := appMain(args); err != nil {
 			logrus.Fatal(err)
 			os.Exit(1)
 		}
@@ -37,39 +38,19 @@ func App() (app *cobra.Command) {
 	return
 }
 
-func appMain() error {
-	fmt.Println("Hello from Lox!")
-
-	c := vm.NewChunk()
-
-	n1 := c.AddConst(vm.Value(1.2))
-	c.Write(uint8(vm.OpConst), 123)
-	// HACK: Truncating from int to uint8.
-	c.Write(uint8(n1), 123)
-
-	n2 := c.AddConst(vm.Value(3.4))
-	c.Write(uint8(vm.OpConst), 123)
-	// HACK: Truncating from int to uint8.
-	c.Write(uint8(n2), 123)
-
-	// 1.2 3.4 +
-	c.Write(uint8(vm.OpAdd), 123)
-
-	n3 := c.AddConst(vm.Value(5.6))
-	c.Write(uint8(vm.OpConst), 123)
-	// HACK: Truncating from int to uint8.
-	c.Write(uint8(n3), 123)
-
-	// 1.2 3.4 + 5.6 / -
-	c.Write(uint8(vm.OpDiv), 123)
-	c.Write(uint8(vm.OpNeg), 123)
-
-	c.Write(uint8(vm.OpReturn), 123)
-
-	fmt.Println(c.Disassemble("test"))
-
+func appMain(args []string) error {
 	vm_ := vm.NewVM()
-	vm_.Interpret(c)
 
-	return nil
+	switch len(args) {
+	case 0:
+		return vm_.REPL()
+	case 1:
+		src, err := ioutil.ReadFile(args[0])
+		if err != nil {
+			return err
+		}
+		return vm_.Interpret(string(src))
+	default:
+		return e.UnreachableError
+	}
 }

@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 
 	e "github.com/rami3l/golox/errors"
 	"github.com/sirupsen/logrus"
@@ -13,9 +15,7 @@ type VM struct {
 	stack []Value
 }
 
-func NewVM() *VM {
-	return &VM{}
-}
+func NewVM() *VM { return &VM{} }
 
 func (vm *VM) push(val Value) {
 	vm.stack = append(vm.stack, val)
@@ -27,7 +27,29 @@ func (vm *VM) pop() (last Value) {
 	return
 }
 
-func (vm *VM) Interpret(chunk *Chunk) error {
+func (vm *VM) REPL() error {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print(">> ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		if line == "" {
+			return nil
+		}
+		if err := vm.Interpret(line); err != nil {
+			return err
+		}
+	}
+}
+
+func (vm *VM) Interpret(src string) error {
+	compiler := NewCompiler()
+	chunk, err := compiler.Compile(src)
+	if err != nil {
+		return err
+	}
 	vm.chunk = chunk
 	return vm.run()
 }
@@ -40,13 +62,13 @@ func (vm *VM) run() error {
 		}
 	}
 
-	oldIP := vm.ip
-
 	readByte := func() (res uint8) {
 		res = vm.chunk.code[vm.ip]
 		vm.ip++
 		return
 	}
+
+	oldIP := vm.ip
 
 	for {
 		logrus.Debug(vm.stackTrace())

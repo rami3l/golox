@@ -6,6 +6,7 @@ require (
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.5.0
 	github.com/t-tomalak/logrus-easy-formatter v0.0.0-20190827215021-c074f06c5816
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
 )
 
 require (
