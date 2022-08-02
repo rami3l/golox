@@ -31,7 +31,7 @@ func App() (app *cobra.Command) {
 		logrus.SetFormatter(&easy.Formatter{LogFormat: "%lvl% %msg%\n"})
 
 		if err := appMain(args); err != nil {
-			logrus.Fatal(err)
+			logrus.Fatalln(err)
 			os.Exit(1)
 		}
 	}
@@ -51,6 +51,6 @@ func appMain(args []string) error {
 		}
 		return vm_.Interpret(string(src))
 	default:
-		return e.UnreachableError
+		panic(e.Unreachable)
 	}
 }

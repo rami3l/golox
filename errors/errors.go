@@ -1,7 +1,6 @@
 package errors
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -23,4 +22,4 @@ func (e *RuntimeError) Error() string {
 	return fmt.Sprintf("runtime error [L%d]: %s", e.Line, e.Reason)
 }
 
-var UnreachableError = errors.New("internal error: entered unreachable code")
+const Unreachable = "internal error: entered unreachable code"

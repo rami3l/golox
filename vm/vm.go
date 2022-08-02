@@ -45,12 +45,13 @@ func (vm *VM) REPL() error {
 }
 
 func (vm *VM) Interpret(src string) error {
-	compiler := NewCompiler()
-	chunk, err := compiler.Compile(src)
+	parser := NewParser()
+	chunk, err := parser.Compile(src)
 	if err != nil {
 		return err
 	}
 	vm.chunk = chunk
+	vm.ip = 0
 	return vm.run()
 }
 
@@ -62,18 +63,17 @@ func (vm *VM) run() error {
 		}
 	}
 
-	readByte := func() (res uint8) {
+	readByte := func() (res byte) {
 		res = vm.chunk.code[vm.ip]
 		vm.ip++
 		return
 	}
 
-	oldIP := vm.ip
-
 	for {
-		logrus.Debug(vm.stackTrace())
+		logrus.Debugln(vm.stackTrace())
+		oldIP := vm.ip
 		instDump, _ := vm.chunk.DisassembleInst(oldIP)
-		logrus.Debug(instDump)
+		logrus.Debugln(instDump)
 		switch inst := OpCode(readByte()); inst {
 		case OpAdd:
 			rhs := vm.pop()

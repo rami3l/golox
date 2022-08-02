@@ -5,7 +5,7 @@ import (
 )
 
 //go:generate stringer -type=OpCode
-type OpCode uint8
+type OpCode byte
 
 const (
 	OpReturn OpCode = iota
@@ -18,7 +18,7 @@ const (
 )
 
 type Chunk struct {
-	code []uint8
+	code []byte
 	// Contract: len(lines) == len(code)
 	lines  []int
 	consts []Value
@@ -26,8 +26,8 @@ type Chunk struct {
 
 func NewChunk() *Chunk { return &Chunk{} }
 
-func (c *Chunk) Write(byte_ uint8, line int) {
-	c.code = append(c.code, byte_)
+func (c *Chunk) Write(b byte, line int) {
+	c.code = append(c.code, b)
 	c.lines = append(c.lines, line)
 }
 
