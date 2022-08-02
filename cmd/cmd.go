@@ -12,13 +12,14 @@ import (
 
 func App() (app *cobra.Command) {
 	app = &cobra.Command{
-		Use:   "golox",
-		Short: "Launch the `golox` interpreter",
+		Use:   "golox [FILE]",
+		Args:  cobra.MaximumNArgs(1),
+		Short: "golox: A Lox interpreter in Go.",
 	}
-
 	app.Flags().SortFlags = true
+
 	defaultVerbosityStr := "INFO"
-	verbosity := app.Flags().StringP("verbosity", "v", defaultVerbosityStr, "Logging verbosity")
+	verbosity := app.Flags().StringP("verbosity", "v", defaultVerbosityStr, "logging verbosity")
 
 	app.Run = func(_ *cobra.Command, args []string) {
 		verbosityLvl, err := logrus.ParseLevel(*verbosity)
@@ -26,7 +27,7 @@ func App() (app *cobra.Command) {
 			verbosityLvl, _ = logrus.ParseLevel(defaultVerbosityStr)
 		}
 		logrus.SetLevel(verbosityLvl)
-		logrus.SetFormatter(&easy.Formatter{LogFormat: "//DBG// %msg%\n"})
+		logrus.SetFormatter(&easy.Formatter{LogFormat: "DBG %msg%\n"})
 
 		if err := appMain(); err != nil {
 			logrus.Fatal(err)

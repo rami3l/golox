@@ -64,7 +64,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 }
 
 func (c *Chunk) Disassemble(name string) (res string) {
-	res += fmt.Sprintf("== %s ==\n", name)
+	res = fmt.Sprintf("== %s ==\n", name)
 	for i := 0; i < len(c.code); {
 		var delta string
 		delta, i = c.DisassembleInst(i)

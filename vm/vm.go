@@ -49,9 +49,9 @@ func (vm *VM) run() error {
 	}
 
 	for {
-		logrus.Debugln(vm.stackTrace())
+		logrus.Debug(vm.stackTrace())
 		instDump, _ := vm.chunk.DisassembleInst(oldIP)
-		logrus.Debugln(instDump)
+		logrus.Debug(instDump)
 		switch inst := OpCode(readByte()); inst {
 		case OpAdd:
 			rhs := vm.pop()
