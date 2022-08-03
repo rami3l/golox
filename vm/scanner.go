@@ -243,19 +243,14 @@ func (s *Scanner) identType() TokenType {
 func (s *Scanner) makeToken(ty TokenType) Token {
 	return Token{
 		Type:  ty,
-		Start: s.start,
-		Len:   s.curr - s.start,
 		Line:  s.line,
+		Runes: s.src[s.start:s.curr],
 	}
-}
-
-func (s *Scanner) tokenStr(tk Token) string {
-	return string(s.src[tk.Start : tk.Start+tk.Len])
 }
 
 func (s *Scanner) errorToken(reason string) (res Token) {
 	res = s.makeToken(TErr)
-	res.ErrorMsg = &reason
+	res.Runes = []rune(reason)
 	return
 }
 
@@ -265,11 +260,10 @@ func isAlpha(c rune) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= '
 func isDigit(c rune) bool { return c >= '0' && c <= '9' }
 
 type Token struct {
-	Type             TokenType
-	Start, Len, Line int
-
-	// ErrorMsg message for TErr.
-	ErrorMsg *string
+	Type TokenType
+	Line int
+	// The corresponding lexeme of this token, or the error message if Type is TErr.
+	Runes []rune
 }
 
 //go:generate stringer -type=TokenType

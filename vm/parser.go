@@ -37,7 +37,7 @@ func (p *Parser) makeConst(val Value) byte {
 }
 
 func (p *Parser) number() {
-	val, err := strconv.ParseFloat(p.tokenStr(p.prev), 64)
+	val, err := strconv.ParseFloat(string(p.prev.Runes), 64)
 	p.errors = multierror.Append(p.errors, err)
 	p.emitConst(Value(val))
 }
@@ -141,7 +141,7 @@ func (p *Parser) advance() {
 		if p.curr = p.ScanToken(); p.curr.Type != TErr {
 			break
 		}
-		p.Error(*p.curr.ErrorMsg)
+		p.Error(string(p.curr.Runes))
 	}
 }
 
@@ -215,9 +215,9 @@ func (p *Parser) ErrorAt(tk Token, reason string) {
 	case TEOF:
 		tkStr = "EOF"
 	case TIdent:
-		tkStr = fmt.Sprintf("identifier `%s`", p.tokenStr(tk))
+		tkStr = fmt.Sprintf("identifier `%s`", string(tk.Runes))
 	default:
-		tkStr = fmt.Sprintf("`%s`", p.tokenStr(tk))
+		tkStr = fmt.Sprintf("`%s`", string(tk.Runes))
 	}
 	reason1 := fmt.Sprintf("at %s, %s", tkStr, reason)
 	err := &e.CompilationError{Line: tk.Line, Reason: reason1}
