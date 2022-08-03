@@ -39,7 +39,7 @@ func (vm *VM) REPL() error {
 			return nil
 		}
 		if err := vm.Interpret(line); err != nil {
-			return err
+			logrus.Error(err)
 		}
 	}
 }

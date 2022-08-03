@@ -209,7 +209,12 @@ func (p *Parser) ErrorAt(tk Token, reason string) {
 		return
 	}
 	p.panicMode = true
-	reason1 := fmt.Sprintf("at %s, %s", p.tokenStr(tk), reason)
+
+	tkStr := "EOF"
+	if tk.Type != TEOF {
+		tkStr = fmt.Sprintf("`%s`", p.tokenStr(tk))
+	}
+	reason1 := fmt.Sprintf("at %s, %s", tkStr, reason)
 	err := &e.CompilationError{Line: tk.Line, Reason: reason1}
 	p.errors = multierror.Append(p.errors, err)
 }
