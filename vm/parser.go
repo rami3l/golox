@@ -118,7 +118,7 @@ func (p *Parser) parsePrec(prec Prec) {
 	}
 	prefix(p)
 
-	// Parse RHS if exists and maintains rule.Prec >= prec.
+	// Parse RHS if there's one maintaining rule.Prec >= prec.
 	for {
 		rule := parseRules[p.curr.Type]
 		if rule.Prec < prec {
@@ -210,8 +210,13 @@ func (p *Parser) ErrorAt(tk Token, reason string) {
 	}
 	p.panicMode = true
 
-	tkStr := "EOF"
-	if tk.Type != TEOF {
+	var tkStr string
+	switch tk.Type {
+	case TEOF:
+		tkStr = "EOF"
+	case TIdent:
+		tkStr = fmt.Sprintf("identifier `%s`", p.tokenStr(tk))
+	default:
 		tkStr = fmt.Sprintf("`%s`", p.tokenStr(tk))
 	}
 	reason1 := fmt.Sprintf("at %s, %s", tkStr, reason)

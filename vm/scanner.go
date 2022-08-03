@@ -187,8 +187,17 @@ func (s *Scanner) identType() TokenType {
 	switch s.src[s.start] {
 	case 'a':
 		return checkKeyword(1, "nd", TAnd)
+	case 'b':
+		return checkKeyword(1, "reak", TBreak)
 	case 'c':
-		return checkKeyword(1, "lass", TClass)
+		if s.curr-s.start > 1 {
+			switch s.src[s.start+1] {
+			case 'l':
+				return checkKeyword(2, "ass", TClass)
+			case 'o':
+				return checkKeyword(2, "ntinue", TContinue)
+			}
+		}
 	case 'e':
 		return checkKeyword(1, "lse", TElse)
 	case 'f':
