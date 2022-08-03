@@ -1,10 +1,10 @@
 package vm
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"io"
 
+	"github.com/chzyer/readline"
 	e "github.com/rami3l/golox/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -28,16 +28,27 @@ func (vm *VM) pop() (last Value) {
 }
 
 func (vm *VM) REPL() error {
-	reader := bufio.NewReader(os.Stdin)
+	reader, err := readline.New(">> ")
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
 	for {
-		fmt.Print(">> ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
+		line, err := reader.Readline()
+		switch err {
+		case nil:
+			if line == "" {
+				return nil
+			}
+		case readline.ErrInterrupt: // ^C
+			continue
+		case io.EOF: // ^D
+			return nil
+		default:
 			return err
 		}
-		if line == "" {
-			return nil
-		}
+
 		if err := vm.Interpret(line); err != nil {
 			logrus.Error(err)
 		}
