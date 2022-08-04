@@ -39,7 +39,7 @@ func (p *Parser) makeConst(val Value) byte {
 func (p *Parser) number() {
 	val, err := strconv.ParseFloat(string(p.prev.Runes), 64)
 	p.errors = multierror.Append(p.errors, err)
-	p.emitConst(Value(val))
+	p.emitConst(VNum(val))
 }
 
 func (p *Parser) grouping() {
@@ -49,6 +49,19 @@ func (p *Parser) grouping() {
 
 func (p *Parser) expression() { p.parsePrec(PrecAssign) }
 
+func (p *Parser) literal() {
+	switch p.prev.Type {
+	case TFalse:
+		p.emitBytes(byte(OpFalse))
+	case TNil:
+		p.emitBytes(byte(OpNil))
+	case TTrue:
+		p.emitBytes(byte(OpTrue))
+	default:
+		panic(e.Unreachable)
+	}
+}
+
 func (p *Parser) unary() {
 	op := p.prev.Type
 
@@ -57,6 +70,8 @@ func (p *Parser) unary() {
 
 	// Emit the operator instruction.
 	switch op {
+	case TBang:
+		p.emitBytes(byte(OpNot))
 	case TMinus:
 		p.emitBytes(byte(OpNeg))
 	default:
@@ -73,6 +88,18 @@ func (p *Parser) binary() {
 
 	// Emit the operator instruction.
 	switch op {
+	case TBangEqual:
+		p.emitBytes(byte(OpEqual), byte(OpNot))
+	case TEqualEqual:
+		p.emitBytes(byte(OpEqual))
+	case TGreater:
+		p.emitBytes(byte(OpGreater))
+	case TGreaterEqual:
+		p.emitBytes(byte(OpLess), byte(OpNot))
+	case TLess:
+		p.emitBytes(byte(OpLess))
+	case TLessEqual:
+		p.emitBytes(byte(OpGreater), byte(OpNot))
 	case TPlus:
 		p.emitBytes(byte(OpAdd))
 	case TMinus:
@@ -97,13 +124,23 @@ var parseRules []ParseRule
 
 func init() {
 	parseRules = []ParseRule{
-		TLParen: {(*Parser).grouping, nil, PrecNone},
-		TMinus:  {(*Parser).unary, (*Parser).binary, PrecTerm},
-		TPlus:   {nil, (*Parser).binary, PrecTerm},
-		TSlash:  {nil, (*Parser).binary, PrecFactor},
-		TStar:   {nil, (*Parser).binary, PrecFactor},
-		TNum:    {(*Parser).number, nil, PrecNone},
-		TEOF:    {},
+		TLParen:       {(*Parser).grouping, nil, PrecNone},
+		TMinus:        {(*Parser).unary, (*Parser).binary, PrecTerm},
+		TPlus:         {nil, (*Parser).binary, PrecTerm},
+		TSlash:        {nil, (*Parser).binary, PrecFactor},
+		TStar:         {nil, (*Parser).binary, PrecFactor},
+		TBang:         {(*Parser).unary, nil, PrecNone},
+		TBangEqual:    {nil, (*Parser).binary, PrecEqual},
+		TEqualEqual:   {nil, (*Parser).binary, PrecEqual},
+		TGreater:      {nil, (*Parser).binary, PrecComp},
+		TGreaterEqual: {nil, (*Parser).binary, PrecComp},
+		TLess:         {nil, (*Parser).binary, PrecComp},
+		TLessEqual:    {nil, (*Parser).binary, PrecComp},
+		TNum:          {(*Parser).number, nil, PrecNone},
+		TFalse:        {(*Parser).literal, nil, PrecNone},
+		TNil:          {(*Parser).literal, nil, PrecNone},
+		TTrue:         {(*Parser).literal, nil, PrecNone},
+		TEOF:          {},
 	}
 }
 

@@ -10,10 +10,17 @@ type OpCode byte
 const (
 	OpReturn OpCode = iota
 	OpConst
+	OpNil
+	OpTrue
+	OpFalse
+	OpEqual
+	OpGreater
+	OpLess
 	OpAdd
 	OpSub
 	OpMul
 	OpDiv
+	OpNot
 	OpNeg
 )
 
@@ -48,17 +55,14 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 	}
 
 	switch inst := OpCode(c.code[offset]); inst {
-	// Nullary operators.
-	case OpReturn, OpNeg, OpAdd, OpSub, OpMul, OpDiv:
-		sprintf("%s", inst)
-		return res, offset + 1
 	// Unary operators.
 	case OpConst:
 		const_ := c.code[offset+1]
 		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2
+	// Nullary operators.
 	default:
-		sprintf("Unknown opcode %d", inst)
+		sprintf("%s", inst)
 		return res, offset + 1
 	}
 }

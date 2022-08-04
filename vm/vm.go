@@ -27,6 +27,10 @@ func (vm *VM) pop() (last Value) {
 	return
 }
 
+func (vm *VM) peek(distance int) Value {
+	return vm.stack[len(vm.stack)-1-distance]
+}
+
 func (vm *VM) REPL() error {
 	reader, err := readline.New(">> ")
 	if err != nil {
@@ -68,10 +72,7 @@ func (vm *VM) Interpret(src string) error {
 
 func (vm *VM) run() error {
 	if vm.chunk == nil {
-		return &e.RuntimeError{
-			Line:   -1,
-			Reason: "chunk uninitialized",
-		}
+		return vm.Error("chunk uninitialized")
 	}
 
 	readByte := func() (res byte) {
@@ -86,26 +87,71 @@ func (vm *VM) run() error {
 		instDump, _ := vm.chunk.DisassembleInst(oldIP)
 		logrus.Debugln(instDump)
 		switch inst := OpCode(readByte()); inst {
-		case OpAdd:
-			rhs := vm.pop()
-			vm.push(vm.pop() + rhs)
-		case OpSub:
-			rhs := vm.pop()
-			vm.push(vm.pop() - rhs)
-		case OpMul:
-			rhs := vm.pop()
-			vm.push(vm.pop() * rhs)
-		case OpDiv:
-			rhs := vm.pop()
-			vm.push(vm.pop() / rhs)
-		case OpNeg:
-			vm.push(-vm.pop())
 		case OpReturn:
 			fmt.Printf("%s\n", vm.pop())
 			return nil
 		case OpConst:
 			const_ := vm.chunk.consts[readByte()]
 			vm.push(const_)
+		case OpNil:
+			vm.push(VNil{})
+		case OpTrue:
+			vm.push(VBool(true))
+		case OpFalse:
+			vm.push(VBool(false))
+		case OpEqual:
+			rhs := vm.pop()
+			vm.push(VEq(vm.pop(), rhs))
+		case OpNot:
+			vm.push(!VTruthy(vm.pop()))
+		case OpNeg:
+			res, ok := VNeg(vm.pop())
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpAdd:
+			rhs := vm.pop()
+			res, ok := VAdd(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpSub:
+			rhs := vm.pop()
+			res, ok := VSub(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpMul:
+			rhs := vm.pop()
+			res, ok := VMul(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpDiv:
+			rhs := vm.pop()
+			res, ok := VDiv(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpGreater:
+			rhs := vm.pop()
+			res, ok := VGreater(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
+		case OpLess:
+			rhs := vm.pop()
+			res, ok := VLess(vm.pop(), rhs)
+			if !ok {
+				return vm.Error("operand must be a number")
+			}
+			vm.push(res)
 		default:
 			return &e.RuntimeError{
 				Line:   vm.chunk.lines[oldIP],
@@ -113,6 +159,14 @@ func (vm *VM) run() error {
 			}
 		}
 	}
+}
+
+func (vm *VM) Error(reason string) *e.RuntimeError {
+	err := &e.RuntimeError{Reason: reason}
+	if vm.chunk != nil {
+		err.Line = vm.chunk.lines[vm.ip]
+	}
+	return err
 }
 
 func (vm *VM) stackTrace() string {

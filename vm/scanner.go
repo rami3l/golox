@@ -40,7 +40,7 @@ func (s *Scanner) ScanToken() Token {
 		return s.makeToken(TNum)
 
 	case isAlpha(c): // Identifier.
-		for c1 := c; isAlpha(c1) || isDigit(c1); c1 = s.peek() {
+		for p := s.peek(); isAlpha(p) || isDigit(p); p = s.peek() {
 			s.advance()
 		}
 		return s.makeToken(s.identType())
@@ -256,7 +256,7 @@ func (s *Scanner) errorToken(reason string) (res Token) {
 
 func (s *Scanner) isAtEnd() bool { return s.curr >= len(s.src) }
 
-func isAlpha(c rune) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'z') || c == '_' }
+func isAlpha(c rune) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' }
 func isDigit(c rune) bool { return c >= '0' && c <= '9' }
 
 type Token struct {
