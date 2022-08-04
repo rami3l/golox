@@ -21,12 +21,28 @@ type VNum float64
 func (_ VNum) isValue()       {}
 func (v VNum) String() string { return fmt.Sprintf("%g", v) }
 
+type VObj interface {
+	Value
+	isObj()
+}
+
+type VStr string // TODO: Support string interning?
+
+func (_ VStr) isValue()       {}
+func (_ VStr) isObj()         {}
+func (v VStr) String() string { return fmt.Sprintf(`"%s"`, string(v)) }
+
 func VAdd(v, w Value) (res Value, ok bool) {
 	res = NewValue()
 	switch v := v.(type) {
 	case VNum:
 		switch w := w.(type) {
 		case VNum:
+			return v + w, true
+		}
+	case VStr:
+		switch w := w.(type) {
+		case VStr:
 			return v + w, true
 		}
 	}
@@ -113,21 +129,4 @@ func VTruthy(v Value) VBool {
 	}
 }
 
-func VEq(v, w Value) VBool {
-	switch v := v.(type) {
-	case VBool:
-		switch w := w.(type) {
-		case VBool:
-			return v == w
-		}
-	case VNum:
-		switch w := w.(type) {
-		case VNum:
-			return v == w
-		}
-	case VNil:
-		_, ok := w.(VNil)
-		return VBool(ok)
-	}
-	return false
-}
+func VEq(v, w Value) VBool { return v == w }

@@ -114,42 +114,42 @@ func (vm *VM) run() error {
 			rhs := vm.pop()
 			res, ok := VAdd(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be all numbers or all strings")
 			}
 			vm.push(res)
 		case OpSub:
 			rhs := vm.pop()
 			res, ok := VSub(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be numbers")
 			}
 			vm.push(res)
 		case OpMul:
 			rhs := vm.pop()
 			res, ok := VMul(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be numbers")
 			}
 			vm.push(res)
 		case OpDiv:
 			rhs := vm.pop()
 			res, ok := VDiv(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be numbers")
 			}
 			vm.push(res)
 		case OpGreater:
 			rhs := vm.pop()
 			res, ok := VGreater(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be numbers")
 			}
 			vm.push(res)
 		case OpLess:
 			rhs := vm.pop()
 			res, ok := VLess(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operand must be a number")
+				return vm.Error("operands must be numbers")
 			}
 			vm.push(res)
 		default:

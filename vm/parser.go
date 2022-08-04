@@ -36,20 +36,20 @@ func (p *Parser) makeConst(val Value) byte {
 	return byte(const_)
 }
 
-func (p *Parser) number() {
+func (p *Parser) num() {
 	val, err := strconv.ParseFloat(string(p.prev.Runes), 64)
 	p.errors = multierror.Append(p.errors, err)
 	p.emitConst(VNum(val))
 }
 
 func (p *Parser) grouping() {
-	p.expression()
+	p.expr()
 	p.consume(TRParen, "expect ')' after expression")
 }
 
-func (p *Parser) expression() { p.parsePrec(PrecAssign) }
+func (p *Parser) expr() { p.parsePrec(PrecAssign) }
 
-func (p *Parser) literal() {
+func (p *Parser) lit() {
 	switch p.prev.Type {
 	case TFalse:
 		p.emitBytes(byte(OpFalse))
@@ -60,6 +60,13 @@ func (p *Parser) literal() {
 	default:
 		panic(e.Unreachable)
 	}
+}
+
+func (p *Parser) str() {
+	runes := p.prev.Runes
+	// COPY the lexeme inside the quotes as a string.
+	unquoted := string(runes[1 : len(runes)-1])
+	p.emitConst(VStr(unquoted))
 }
 
 func (p *Parser) unary() {
@@ -136,10 +143,11 @@ func init() {
 		TGreaterEqual: {nil, (*Parser).binary, PrecComp},
 		TLess:         {nil, (*Parser).binary, PrecComp},
 		TLessEqual:    {nil, (*Parser).binary, PrecComp},
-		TNum:          {(*Parser).number, nil, PrecNone},
-		TFalse:        {(*Parser).literal, nil, PrecNone},
-		TNil:          {(*Parser).literal, nil, PrecNone},
-		TTrue:         {(*Parser).literal, nil, PrecNone},
+		TStr:          {(*Parser).str, nil, PrecNone},
+		TNum:          {(*Parser).num, nil, PrecNone},
+		TFalse:        {(*Parser).lit, nil, PrecNone},
+		TNil:          {(*Parser).lit, nil, PrecNone},
+		TTrue:         {(*Parser).lit, nil, PrecNone},
 		TEOF:          {},
 	}
 }
@@ -200,7 +208,7 @@ func (p *Parser) Compile(src string) (*Chunk, error) {
 	p.Scanner = NewScanner(src)
 	p.advance()
 
-	p.expression()
+	p.expr()
 	p.consume(TEOF, "expect end of expression")
 
 	p.endCompiler()
