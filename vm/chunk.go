@@ -12,6 +12,8 @@ const (
 	OpTrue
 	OpFalse
 	OpPop
+	OpGetLocal
+	OpSetLocal
 	OpGetGlobal
 	OpDefGlobal
 	OpSetGlobal
@@ -59,7 +61,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 
 	switch inst := OpCode(c.code[offset]); inst {
 	// Unary operators.
-	case OpConst, OpGetGlobal, OpDefGlobal, OpSetGlobal:
+	case OpConst, OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal:
 		const_ := c.code[offset+1]
 		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2

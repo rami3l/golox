@@ -266,7 +266,8 @@ type Token struct {
 	Runes []rune
 }
 
-func (t Token) String() string { return string(t.Runes) }
+func (t Token) String() string  { return string(t.Runes) }
+func (t Token) Eq(u Token) bool { return t.Type == u.Type && slices.Equal(t.Runes, u.Runes) }
 
 //go:generate stringer -type=TokenType
 type TokenType int

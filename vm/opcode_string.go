@@ -14,24 +14,26 @@ func _() {
 	_ = x[OpTrue-3]
 	_ = x[OpFalse-4]
 	_ = x[OpPop-5]
-	_ = x[OpGetGlobal-6]
-	_ = x[OpDefGlobal-7]
-	_ = x[OpSetGlobal-8]
-	_ = x[OpEqual-9]
-	_ = x[OpGreater-10]
-	_ = x[OpLess-11]
-	_ = x[OpNot-12]
-	_ = x[OpNeg-13]
-	_ = x[OpAdd-14]
-	_ = x[OpSub-15]
-	_ = x[OpMul-16]
-	_ = x[OpDiv-17]
-	_ = x[OpPrint-18]
+	_ = x[OpGetLocal-6]
+	_ = x[OpSetLocal-7]
+	_ = x[OpGetGlobal-8]
+	_ = x[OpDefGlobal-9]
+	_ = x[OpSetGlobal-10]
+	_ = x[OpEqual-11]
+	_ = x[OpGreater-12]
+	_ = x[OpLess-13]
+	_ = x[OpNot-14]
+	_ = x[OpNeg-15]
+	_ = x[OpAdd-16]
+	_ = x[OpSub-17]
+	_ = x[OpMul-18]
+	_ = x[OpDiv-19]
+	_ = x[OpPrint-20]
 }
 
-const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetGlobalOpDefGlobalOpSetGlobalOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrint"
+const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrint"
 
-var _OpCode_index = [...]uint8{0, 8, 15, 20, 26, 33, 38, 49, 60, 71, 78, 87, 93, 98, 103, 108, 113, 118, 123, 130}
+var _OpCode_index = [...]uint8{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 98, 107, 113, 118, 123, 128, 133, 138, 143, 150}
 
 func (i OpCode) String() string {
 	if i >= OpCode(len(_OpCode_index)-1) {

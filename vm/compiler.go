@@ -13,6 +13,7 @@ import (
 
 type Parser struct {
 	*Scanner
+	*Compiler
 	prev, curr     Token
 	compilingChunk *Chunk
 
@@ -22,6 +23,30 @@ type Parser struct {
 }
 
 func NewParser() *Parser { return &Parser{} }
+
+type Compiler struct {
+	locals []Local
+	depth  int
+}
+
+const (
+	GlobalSlot = -1 - iota
+	UninitDepth
+)
+
+func NewCompiler() *Compiler { return &Compiler{} }
+
+func (c *Compiler) addLocal(name Token) {
+	if len(c.locals) >= math.MaxUint8+1 {
+		logrus.Panicln("too many variables in function")
+	}
+	c.locals = append(c.locals, Local{name, UninitDepth})
+}
+
+type Local struct {
+	name  Token
+	depth int
+}
 
 /* Single-pass compilation */
 
@@ -69,13 +94,24 @@ func (p *Parser) str(_canAssign bool) {
 func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
 
 func (p *Parser) namedVar(name Token, canAssign bool) {
-	arg := p.identConst(&name)
+	slot := p.resolveLocal(name)
+	if slot > math.MaxUint8 {
+		logrus.Panicln("scope depth limit exceeded")
+	}
+	var arg byte
+	get, set := OpGetLocal, OpSetLocal
+	if slot == GlobalSlot {
+		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
+	} else {
+		arg = byte(slot)
+	}
+
 	switch {
 	case canAssign && p.match(TEqual):
 		p.expr()
-		p.emitBytes(byte(OpSetGlobal), arg)
+		p.emitBytes(byte(set), arg)
 	default:
-		p.emitBytes(byte(OpGetGlobal), arg)
+		p.emitBytes(byte(get), arg)
 	}
 }
 
@@ -144,32 +180,24 @@ func (p *Parser) printStmt() {
 	p.emitBytes(byte(OpPrint))
 }
 
+func (p *Parser) block() {
+	for !p.check(TRBrace) && !p.check(TEOF) {
+		p.decl()
+	}
+	p.consume(TRBrace, "expect '}' after block")
+}
+
 func (p *Parser) stmt() {
 	switch {
 	case p.match(TPrint):
 		p.printStmt()
+	case p.match(TLBrace):
+		p.beginScope()
+		p.block()
+		p.endScope()
 	default:
 		p.exprStmt()
 	}
-}
-
-func (p *Parser) identConst(name *Token) byte { return p.makeConst(NewVStr(name.String())) }
-func (p *Parser) defVar(global byte)          { p.emitBytes(byte(OpDefGlobal), global) }
-
-func (p *Parser) varDecl() {
-	if target := p.consume(TIdent, "expect variable name"); target != nil {
-		global := p.identConst(target)
-		defer p.defVar(global)
-	} else {
-		p.advance()
-	}
-	switch {
-	case p.match(TEqual):
-		p.expr()
-	default:
-		p.emitBytes(byte(OpNil))
-	}
-	p.consume(TSemi, "expect ';' after variable declaration")
 }
 
 func (p *Parser) decl() {
@@ -283,20 +311,20 @@ func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
 
 /* Compiling helpers */
 
-func (p *Parser) Compile(src string) (*Chunk, error) {
-	res := NewChunk()
+func (p *Parser) Compile(src string) (res *Chunk, err error) {
+	res = NewChunk()
 	p.compilingChunk = res
 	defer func() { p.compilingChunk = nil }()
-
+	p.Compiler = NewCompiler()
 	p.Scanner = NewScanner(src)
-	p.advance()
 
+	p.advance()
 	for !p.match(TEOF) {
 		p.decl()
 	}
-
 	p.endCompiler()
-	return res, p.errors.ErrorOrNil()
+	err = p.errors.ErrorOrNil()
+	return
 }
 
 func (p *Parser) currentChunk() *Chunk { return p.compilingChunk }
@@ -313,6 +341,91 @@ func (p *Parser) endCompiler() {
 		logrus.Debugln(p.currentChunk().Disassemble("endCompiler"))
 	}
 }
+
+func (p *Parser) identConst(name *Token) byte { return p.makeConst(NewVStr(name.String())) }
+func (p *Parser) markInit()                   { p.locals[len(p.locals)-1].depth = p.depth }
+
+func (p *Parser) defVar(global *byte) {
+	if global == nil || p.depth > 0 {
+		// Local vars. Mark it as initialized.
+		p.markInit()
+		return
+	}
+	p.emitBytes(byte(OpDefGlobal), *global)
+}
+
+func (p *Parser) parseVar(errorMsg string) *byte {
+	target := p.consume(TIdent, errorMsg)
+	if target == nil {
+		p.advance()
+		return nil // Early return if the assignee is not valid.
+	}
+	p.declVar()
+	if p.depth > 0 {
+		return nil // Local vars are not resolved using `identConst`, but stay on the stack.
+	}
+	res := p.identConst(target)
+	return &res
+}
+
+func (p *Parser) declVar() {
+	if p.depth == 0 {
+		return
+	}
+	name := p.prev
+	// Search for the latest variable declaration of the same name.
+	for i := len(p.locals) - 1; i >= 0; i-- {
+		local := p.locals[i]
+		if local.depth != UninitDepth && local.depth < p.depth {
+			break // Variable shadowing in a deeper scope is allowed.
+		}
+		if name.Eq(local.name) {
+			p.Error("already a variable with this name in this scope")
+		}
+	}
+	p.addLocal(name)
+}
+
+func (p *Parser) varDecl() {
+	global := p.parseVar("expect variable name")
+	validName := p.checkPrev(TIdent)
+	switch {
+	case p.match(TEqual):
+		p.expr()
+	default:
+		p.emitBytes(byte(OpNil))
+	}
+	p.consume(TSemi, "expect ';' after variable declaration")
+	if validName {
+		p.defVar(global)
+	}
+}
+
+func (p *Parser) beginScope() { p.depth++ }
+
+func (p *Parser) endScope() {
+	p.depth--
+	for len(p.locals) > 0 && p.locals[len(p.locals)-1].depth > p.depth {
+		p.emitBytes(byte(OpPop)) // Pop off the local on the stack.
+		p.locals = p.locals[0 : len(p.locals)-1]
+	}
+}
+
+func (p *Parser) resolveLocal(name Token) (slot int) {
+	// Search for the latest variable declaration of the same name.
+	for i := len(p.locals) - 1; i >= 0; i-- {
+		local := p.locals[i]
+		if name.Eq(local.name) {
+			if local.depth == UninitDepth {
+				p.Error("can't read local variable in its own initializer")
+			}
+			return i
+		}
+	}
+	return GlobalSlot // Global variable.
+}
+
+/* Precedence */
 
 //go:generate stringer -type=Prec
 type Prec int

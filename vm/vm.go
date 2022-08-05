@@ -107,6 +107,13 @@ func (vm *VM) run() error {
 			vm.push(VBool(false))
 		case OpPop:
 			vm.pop()
+		case OpGetLocal:
+			slot := readByte()
+			vm.push(vm.stack[slot])
+		case OpSetLocal:
+			slot := readByte()
+			vm.stack[slot] = vm.peek(0)
+			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetGlobal:
 			name := readConst().(VStr)
 			val, ok := vm.globals[name]
