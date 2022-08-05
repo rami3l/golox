@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -24,8 +25,6 @@ func NewParser() *Parser { return &Parser{} }
 
 /* Single-pass compilation */
 
-func (p *Parser) emitReturn() { p.emitBytes(byte(OpReturn)) }
-
 func (p *Parser) emitConst(val Value) { p.emitBytes(byte(OpConst), p.makeConst(val)) }
 
 func (p *Parser) makeConst(val Value) byte {
@@ -36,20 +35,18 @@ func (p *Parser) makeConst(val Value) byte {
 	return byte(const_)
 }
 
-func (p *Parser) num() {
-	val, err := strconv.ParseFloat(string(p.prev.Runes), 64)
+func (p *Parser) num(_canAssign bool) {
+	val, err := strconv.ParseFloat(p.prev.String(), 64)
 	p.errors = multierror.Append(p.errors, err)
 	p.emitConst(VNum(val))
 }
 
-func (p *Parser) grouping() {
+func (p *Parser) grouping(_canAssign bool) {
 	p.expr()
 	p.consume(TRParen, "expect ')' after expression")
 }
 
-func (p *Parser) expr() { p.parsePrec(PrecAssign) }
-
-func (p *Parser) lit() {
+func (p *Parser) lit(_canAssign bool) {
 	switch p.prev.Type {
 	case TFalse:
 		p.emitBytes(byte(OpFalse))
@@ -62,14 +59,27 @@ func (p *Parser) lit() {
 	}
 }
 
-func (p *Parser) str() {
+func (p *Parser) str(_canAssign bool) {
 	runes := p.prev.Runes
 	// COPY the lexeme inside the quotes as a string.
 	unquoted := string(runes[1 : len(runes)-1])
-	p.emitConst(VStr(unquoted))
+	p.emitConst(NewVStr(unquoted))
 }
 
-func (p *Parser) unary() {
+func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
+
+func (p *Parser) namedVar(name Token, canAssign bool) {
+	arg := p.identConst(&name)
+	switch {
+	case canAssign && p.match(TEqual):
+		p.expr()
+		p.emitBytes(byte(OpSetGlobal), arg)
+	default:
+		p.emitBytes(byte(OpGetGlobal), arg)
+	}
+}
+
+func (p *Parser) unary(_canAssign bool) {
 	op := p.prev.Type
 
 	// Compile the RHS.
@@ -86,7 +96,7 @@ func (p *Parser) unary() {
 	}
 }
 
-func (p *Parser) binary() {
+func (p *Parser) binary(_canAssign bool) {
 	op := p.prev.Type
 	rule := parseRules[op]
 
@@ -120,7 +130,61 @@ func (p *Parser) binary() {
 	}
 }
 
-type ParseFn = func(*Parser)
+func (p *Parser) expr() { p.parsePrec(PrecAssign) }
+
+func (p *Parser) exprStmt() {
+	p.expr()
+	p.consume(TSemi, "expect ';' after value")
+	p.emitBytes(byte(OpPop))
+}
+
+func (p *Parser) printStmt() {
+	p.expr()
+	p.consume(TSemi, "expect ';' after value")
+	p.emitBytes(byte(OpPrint))
+}
+
+func (p *Parser) stmt() {
+	switch {
+	case p.match(TPrint):
+		p.printStmt()
+	default:
+		p.exprStmt()
+	}
+}
+
+func (p *Parser) identConst(name *Token) byte { return p.makeConst(NewVStr(name.String())) }
+func (p *Parser) defVar(global byte)          { p.emitBytes(byte(OpDefGlobal), global) }
+
+func (p *Parser) varDecl() {
+	if target := p.consume(TIdent, "expect variable name"); target != nil {
+		global := p.identConst(target)
+		defer p.defVar(global)
+	} else {
+		p.advance()
+	}
+	switch {
+	case p.match(TEqual):
+		p.expr()
+	default:
+		p.emitBytes(byte(OpNil))
+	}
+	p.consume(TSemi, "expect ';' after variable declaration")
+}
+
+func (p *Parser) decl() {
+	switch {
+	case p.match(TVar):
+		p.varDecl()
+	default:
+		p.stmt()
+	}
+	if p.panicMode {
+		p.sync()
+	}
+}
+
+type ParseFn = func(p *Parser, canAssign bool)
 
 type ParseRule struct {
 	Prefix, Infix ParseFn
@@ -143,6 +207,7 @@ func init() {
 		TGreaterEqual: {nil, (*Parser).binary, PrecComp},
 		TLess:         {nil, (*Parser).binary, PrecComp},
 		TLessEqual:    {nil, (*Parser).binary, PrecComp},
+		TIdent:        {(*Parser).var_, nil, PrecNone},
 		TStr:          {(*Parser).str, nil, PrecNone},
 		TNum:          {(*Parser).num, nil, PrecNone},
 		TFalse:        {(*Parser).lit, nil, PrecNone},
@@ -161,7 +226,8 @@ func (p *Parser) parsePrec(prec Prec) {
 		p.Error("expect expression")
 		return
 	}
-	prefix(p)
+	canAssign := prec <= PrecAssign
+	prefix(p, canAssign)
 
 	// Parse RHS if there's one maintaining rule.Prec >= prec.
 	for {
@@ -173,29 +239,46 @@ func (p *Parser) parsePrec(prec Prec) {
 		if rule.Infix == nil {
 			panic(e.Unreachable)
 		}
-		rule.Infix(p)
+		rule.Infix(p, canAssign)
+	}
+
+	if canAssign && p.match(TEqual) {
+		p.Error("invalid assignment target")
+		p.advance()
 	}
 }
 
 /* Parsing helpers */
 
+func (p *Parser) check(ty TokenType) bool     { return p.curr.Type == ty }
+func (p *Parser) checkPrev(ty TokenType) bool { return p.prev.Type == ty }
+
 func (p *Parser) advance() {
 	p.prev = p.curr
 	for {
 		// Skip until the first non-TErr token.
-		if p.curr = p.ScanToken(); p.curr.Type != TErr {
+		if p.curr = p.ScanToken(); !p.check(TErr) {
 			break
 		}
-		p.Error(string(p.curr.Runes))
+		p.Error(p.curr.String())
 	}
 }
 
-func (p *Parser) consume(ty TokenType, errorMsg string) {
-	if p.curr.Type != ty {
-		p.ErrorAtCurr(errorMsg)
-		return
+func (p *Parser) match(ty TokenType) (matched bool) {
+	if !p.check(ty) {
+		return false
 	}
 	p.advance()
+	return true
+}
+
+func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
+	if !p.check(ty) {
+		p.ErrorAtCurr(errorMsg)
+		return nil
+	}
+	p.advance()
+	return &p.prev
 }
 
 /* Compiling helpers */
@@ -208,11 +291,11 @@ func (p *Parser) Compile(src string) (*Chunk, error) {
 	p.Scanner = NewScanner(src)
 	p.advance()
 
-	p.expr()
-	p.consume(TEOF, "expect end of expression")
+	for !p.match(TEOF) {
+		p.decl()
+	}
 
 	p.endCompiler()
-
 	return res, p.errors.ErrorOrNil()
 }
 
@@ -225,8 +308,10 @@ func (p *Parser) emitBytes(bs ...byte) {
 }
 
 func (p *Parser) endCompiler() {
-	p.emitReturn()
-	logrus.Debugln(p.currentChunk().Disassemble("code"))
+	p.emitBytes(byte(OpReturn))
+	if debug.DEBUG {
+		logrus.Debugln(p.currentChunk().Disassemble("endCompiler"))
+	}
 }
 
 //go:generate stringer -type=Prec
@@ -248,6 +333,17 @@ const (
 
 /* Error handling */
 
+func (p *Parser) sync() {
+	p.panicMode = false
+	for !p.check(TEOF) && !p.checkPrev(TSemi) {
+		switch p.curr.Type {
+		case TClass, TFun, TVar, TFor, TIf, TWhile, TPrint, TReturn:
+			return
+		}
+	}
+	p.advance()
+}
+
 func (p *Parser) ErrorAt(tk Token, reason string) {
 	// Don't collect error when we're syncing.
 	if p.panicMode {
@@ -260,12 +356,18 @@ func (p *Parser) ErrorAt(tk Token, reason string) {
 	case TEOF:
 		tkStr = "EOF"
 	case TIdent:
-		tkStr = fmt.Sprintf("identifier `%s`", string(tk.Runes))
+		tkStr = fmt.Sprintf("identifier `%v`", tk)
 	default:
-		tkStr = fmt.Sprintf("`%s`", string(tk.Runes))
+		tkStr = fmt.Sprintf("`%v`", tk)
 	}
 	reason1 := fmt.Sprintf("at %s, %s", tkStr, reason)
 	err := &e.CompilationError{Line: tk.Line, Reason: reason1}
+
+	if debug.DEBUG {
+		logrus.Debugln(p.currentChunk().Disassemble("ErrorAt"))
+		logrus.Debugln(err)
+	}
+
 	p.errors = multierror.Append(p.errors, err)
 }
 

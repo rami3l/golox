@@ -1,8 +1,6 @@
 package vm
 
-import (
-	"fmt"
-)
+import "fmt"
 
 //go:generate stringer -type=OpCode
 type OpCode byte
@@ -13,15 +11,20 @@ const (
 	OpNil
 	OpTrue
 	OpFalse
+	OpPop
+	OpGetGlobal
+	OpDefGlobal
+	OpSetGlobal
 	OpEqual
 	OpGreater
 	OpLess
+	OpNot
+	OpNeg
 	OpAdd
 	OpSub
 	OpMul
 	OpDiv
-	OpNot
-	OpNeg
+	OpPrint
 )
 
 type Chunk struct {
@@ -56,7 +59,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 
 	switch inst := OpCode(c.code[offset]); inst {
 	// Unary operators.
-	case OpConst:
+	case OpConst, OpGetGlobal, OpDefGlobal, OpSetGlobal:
 		const_ := c.code[offset+1]
 		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2

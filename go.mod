@@ -5,6 +5,7 @@ go 1.18
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/hashicorp/go-multierror v1.1.1
+	github.com/josharian/intern v1.0.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.5.0
 	github.com/t-tomalak/logrus-easy-formatter v0.0.0-20190827215021-c074f06c5816

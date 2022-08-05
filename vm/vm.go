@@ -5,17 +5,19 @@ import (
 	"io"
 
 	"github.com/chzyer/readline"
+	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
 	"github.com/sirupsen/logrus"
 )
 
 type VM struct {
-	chunk *Chunk
-	ip    int
-	stack []Value
+	chunk   *Chunk
+	ip      int
+	stack   []Value
+	globals map[VStr]Value
 }
 
-func NewVM() *VM { return &VM{} }
+func NewVM() *VM { return &VM{globals: map[VStr]Value{}} }
 
 func (vm *VM) push(val Value) {
 	vm.stack = append(vm.stack, val)
@@ -72,7 +74,7 @@ func (vm *VM) Interpret(src string) error {
 
 func (vm *VM) run() error {
 	if vm.chunk == nil {
-		return vm.Error("chunk uninitialized")
+		return vm.MkError("chunk uninitialized")
 	}
 
 	readByte := func() (res byte) {
@@ -81,77 +83,103 @@ func (vm *VM) run() error {
 		return
 	}
 
+	readConst := func() Value { return vm.chunk.consts[readByte()] }
+
 	for {
-		logrus.Debugln(vm.stackTrace())
+		if debug.DEBUG {
+			logrus.Debugln(vm.stackTrace())
+		}
 		oldIP := vm.ip
-		instDump, _ := vm.chunk.DisassembleInst(oldIP)
-		logrus.Debugln(instDump)
+		if debug.DEBUG {
+			instDump, _ := vm.chunk.DisassembleInst(oldIP)
+			logrus.Debugln(instDump)
+		}
 		switch inst := OpCode(readByte()); inst {
 		case OpReturn:
-			fmt.Printf("%s\n", vm.pop())
 			return nil
 		case OpConst:
-			const_ := vm.chunk.consts[readByte()]
-			vm.push(const_)
+			vm.push(readConst())
 		case OpNil:
 			vm.push(VNil{})
 		case OpTrue:
 			vm.push(VBool(true))
 		case OpFalse:
 			vm.push(VBool(false))
+		case OpPop:
+			vm.pop()
+		case OpGetGlobal:
+			name := readConst().(VStr)
+			val, ok := vm.globals[name]
+			if !ok {
+				return vm.MkErrorf("undefined variable '%v'", name)
+			}
+			vm.push(val)
+		case OpDefGlobal:
+			name := readConst().(VStr)
+			vm.globals[name] = vm.peek(0)
+			vm.pop()
+		case OpSetGlobal:
+			name := readConst().(VStr)
+			if _, ok := vm.globals[name]; !ok {
+				return vm.MkErrorf("undefined variable '%v'", name)
+			}
+			vm.globals[name] = vm.peek(0)
+			// Don't pop, since the set operation has the RHS as its return value.
 		case OpEqual:
 			rhs := vm.pop()
 			vm.push(VEq(vm.pop(), rhs))
-		case OpNot:
-			vm.push(!VTruthy(vm.pop()))
-		case OpNeg:
-			res, ok := VNeg(vm.pop())
-			if !ok {
-				return vm.Error("operand must be a number")
-			}
-			vm.push(res)
-		case OpAdd:
-			rhs := vm.pop()
-			res, ok := VAdd(vm.pop(), rhs)
-			if !ok {
-				return vm.Error("operands must be all numbers or all strings")
-			}
-			vm.push(res)
-		case OpSub:
-			rhs := vm.pop()
-			res, ok := VSub(vm.pop(), rhs)
-			if !ok {
-				return vm.Error("operands must be numbers")
-			}
-			vm.push(res)
-		case OpMul:
-			rhs := vm.pop()
-			res, ok := VMul(vm.pop(), rhs)
-			if !ok {
-				return vm.Error("operands must be numbers")
-			}
-			vm.push(res)
-		case OpDiv:
-			rhs := vm.pop()
-			res, ok := VDiv(vm.pop(), rhs)
-			if !ok {
-				return vm.Error("operands must be numbers")
-			}
-			vm.push(res)
 		case OpGreater:
 			rhs := vm.pop()
 			res, ok := VGreater(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operands must be numbers")
+				return vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpLess:
 			rhs := vm.pop()
 			res, ok := VLess(vm.pop(), rhs)
 			if !ok {
-				return vm.Error("operands must be numbers")
+				return vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
+		case OpNot:
+			vm.push(!VTruthy(vm.pop()))
+		case OpNeg:
+			res, ok := VNeg(vm.pop())
+			if !ok {
+				return vm.MkError("operand must be a number")
+			}
+			vm.push(res)
+		case OpAdd:
+			rhs := vm.pop()
+			res, ok := VAdd(vm.pop(), rhs)
+			if !ok {
+				return vm.MkError("operands must be all numbers or all strings")
+			}
+			vm.push(res)
+		case OpSub:
+			rhs := vm.pop()
+			res, ok := VSub(vm.pop(), rhs)
+			if !ok {
+				return vm.MkError("operands must be numbers")
+			}
+			vm.push(res)
+		case OpMul:
+			rhs := vm.pop()
+			res, ok := VMul(vm.pop(), rhs)
+			if !ok {
+				return vm.MkError("operands must be numbers")
+			}
+			vm.push(res)
+		case OpDiv:
+			rhs := vm.pop()
+			res, ok := VDiv(vm.pop(), rhs)
+			if !ok {
+				return vm.MkError("operands must be numbers")
+			}
+			vm.push(res)
+		case OpPrint:
+			fmt.Printf("%s\n", vm.pop())
 		default:
 			return &e.RuntimeError{
 				Line:   vm.chunk.lines[oldIP],
@@ -161,7 +189,7 @@ func (vm *VM) run() error {
 	}
 }
 
-func (vm *VM) Error(reason string) *e.RuntimeError {
+func (vm *VM) MkError(reason string) *e.RuntimeError {
 	err := &e.RuntimeError{Reason: reason}
 	if vm.chunk != nil {
 		err.Line = vm.chunk.lines[vm.ip]
@@ -169,8 +197,16 @@ func (vm *VM) Error(reason string) *e.RuntimeError {
 	return err
 }
 
+func (vm *VM) MkErrorf(format string, a ...any) *e.RuntimeError {
+	return vm.MkError(fmt.Sprintf(format, a...))
+}
+
 func (vm *VM) stackTrace() string {
 	res := "          "
+	if len(vm.stack) == 0 {
+		res += "[   ]"
+		return res
+	}
 	for _, slot := range vm.stack {
 		res += fmt.Sprintf("[ %s ]", slot)
 	}

@@ -266,6 +266,8 @@ type Token struct {
 	Runes []rune
 }
 
+func (t Token) String() string { return string(t.Runes) }
+
 //go:generate stringer -type=TokenType
 type TokenType int
 

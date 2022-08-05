@@ -1,6 +1,10 @@
 package vm
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/josharian/intern"
+)
 
 type Value interface{ isValue() }
 
@@ -26,11 +30,14 @@ type VObj interface {
 	isObj()
 }
 
-type VStr string // TODO: Support string interning?
+type VStr struct{ _inner string }
+
+func NewVStr(s string) VStr   { return VStr{intern.String(s)} }
+func (v *VStr) Inner() string { return v._inner }
 
 func (_ VStr) isValue()       {}
 func (_ VStr) isObj()         {}
-func (v VStr) String() string { return fmt.Sprintf(`"%s"`, string(v)) }
+func (v VStr) String() string { return fmt.Sprintf(`"%s"`, v.Inner()) }
 
 func VAdd(v, w Value) (res Value, ok bool) {
 	res = NewValue()
@@ -43,7 +50,7 @@ func VAdd(v, w Value) (res Value, ok bool) {
 	case VStr:
 		switch w := w.(type) {
 		case VStr:
-			return v + w, true
+			return NewVStr(v.Inner() + w.Inner()), true
 		}
 	}
 	return
