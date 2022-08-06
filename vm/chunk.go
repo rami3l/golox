@@ -27,6 +27,8 @@ const (
 	OpMul
 	OpDiv
 	OpPrint
+	OpJump
+	OpJumpUnless
 )
 
 type Chunk struct {
@@ -60,10 +62,20 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 	}
 
 	switch inst := OpCode(c.code[offset]); inst {
+	// Jump operators.
+	case OpJump, OpJumpUnless:
+		jump := int(c.code[offset+1])<<8 | int(c.code[offset+2])
+		sprintf("%-16s %4d -> %d\n", inst, offset,
+			offset+3+jump)
+		return res, offset + 3
 	// Unary operators.
-	case OpConst, OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal:
+	case OpConst:
 		const_ := c.code[offset+1]
 		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
+		return res, offset + 2
+	case OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal:
+		slot := c.code[offset+1]
+		sprintf("%-16s %4d '%s'", inst, slot, c.code[slot])
 		return res, offset + 2
 	// Nullary operators.
 	default:

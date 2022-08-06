@@ -187,10 +187,31 @@ func (p *Parser) block() {
 	p.consume(TRBrace, "expect '}' after block")
 }
 
+func (p *Parser) ifStmt() {
+	p.consume(TLParen, "expect '(' after 'if'")
+	p.expr()
+	p.consume(TRParen, "expect ')' after condition")
+
+	thenJump := p.emitJump(OpJumpUnless) // <-- `else` branch stops.
+	p.emitBytes(byte(OpPop))             // Drop the predicate before the `then` statement.
+	p.stmt()
+
+	elseJump := p.emitJump(OpJump) // <-- `then` branch stops.
+	p.patchJump(thenJump)          // --> `else` branch continues.
+
+	p.emitBytes(byte(OpPop)) // Drop the predicate before the `else` statement.
+	if p.match(TElse) {
+		p.stmt()
+	}
+	p.patchJump(elseJump) // --> `then` branch continues.
+}
+
 func (p *Parser) stmt() {
 	switch {
 	case p.match(TPrint):
 		p.printStmt()
+	case p.match(TIf):
+		p.ifStmt()
 	case p.match(TLBrace):
 		p.beginScope()
 		p.block()
@@ -423,6 +444,23 @@ func (p *Parser) resolveLocal(name Token) (slot int) {
 		}
 	}
 	return GlobalSlot // Global variable.
+}
+
+func (p *Parser) emitJump(inst OpCode) (offset int) {
+	p.emitBytes(byte(inst), 0xff, 0xff)
+	return len(p.currentChunk().code) - 2
+}
+
+func (p *Parser) patchJump(offset int) {
+	code := p.currentChunk().code
+	// A jump uses 2 bytes to encode the offset, so
+	// -2 to adjust for the bytecode for the jump offset itself:
+	// [OpJump] [0xff@offset] [0xff@(offset+1)] [GOAL@(offset+2)] ... [CURR@(len-1)]
+	jump := len(code) - (offset + 2) // The bytes to jump over.
+	if jump > math.MaxUint16 {
+		logrus.Panicln("too much code to jump over")
+	}
+	code[offset], code[offset+1] = byte(jump>>8&0xff), byte(jump&0xff)
 }
 
 /* Precedence */

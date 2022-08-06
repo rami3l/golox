@@ -83,6 +83,12 @@ func (vm *VM) run() error {
 		return
 	}
 
+	readShort := func() (res uint16) {
+		res = uint16(readByte()) << 8
+		res |= uint16(readByte())
+		return
+	}
+
 	readConst := func() Value { return vm.chunk.consts[readByte()] }
 
 	for {
@@ -187,6 +193,14 @@ func (vm *VM) run() error {
 			vm.push(res)
 		case OpPrint:
 			fmt.Printf("%s\n", vm.pop())
+		case OpJump:
+			offset := readShort()
+			vm.ip += int(offset)
+		case OpJumpUnless:
+			offset := readShort()
+			if !VTruthy(vm.peek(0)) {
+				vm.ip += int(offset)
+			}
 		default:
 			return &e.RuntimeError{
 				Line:   vm.chunk.lines[oldIP],
