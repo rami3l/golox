@@ -17,6 +17,9 @@ type Parser struct {
 	prev, curr     Token
 	compilingChunk *Chunk
 
+	loopStart    *int
+	loopEndHoles []int
+
 	errors *multierror.Error
 	// Whether the parser is trying to sync, i.e. in the error recovery process.
 	panicMode bool
@@ -234,7 +237,7 @@ func (p *Parser) ifStmt() {
 }
 
 func (p *Parser) whileStmt() {
-	start := len(p.currentChunk().code)
+	p.beginLoop()
 	p.consume(TLParen, "expect '(' after 'while'")
 	p.expr()
 	p.consume(TRParen, "expect ')' after condition")
@@ -242,7 +245,9 @@ func (p *Parser) whileStmt() {
 	exitJump := p.emitJump(OpJumpUnless)
 	p.emitBytes(byte(OpPop)) // Pop the condition.
 	p.stmt()
-	p.emitLoop(start)
+	p.emitLoop(*p.loopStart)
+	p.endLoop()
+
 	p.patchJump(exitJump) // Pop the condition.
 	p.emitBytes(byte(OpPop))
 }
@@ -264,42 +269,58 @@ func (p *Parser) forStmt() {
 	}
 
 	// cond
-	start := len(p.currentChunk().code)
-	exitJump := Uninit
+	start := p.beginLoop()
+	exitJump := (*int)(nil)
 	if !p.match(TSemi) {
 		p.expr()
 		p.consume(TSemi, "expect ';' after loop condition")
-		exitJump = p.emitJump(OpJumpUnless) // <-- !!cond == false
-		p.emitBytes(byte(OpPop))            // Pop the condition.
+		exitJump1 := p.emitJump(OpJumpUnless) // <-- !!cond == false
+		exitJump = &exitJump1
+		p.emitBytes(byte(OpPop)) // Pop the condition.
 	}
 
 	// incr
 	if !p.match(TRParen) {
-		bodyJump := p.emitJump(OpJump)          // <-- body
-		incrStart := len(p.currentChunk().code) // <-- incr
+		bodyJump := p.emitJump(OpJump) // <-- body
+		p.beginLoop()                  // <-- incr
 		// Parse an exprStmt sans the trailing ';'.
 		p.expr()
 		p.emitBytes(byte(OpPop)) // Pure side effect.
 
 		p.consume(TRParen, "expect ')' after for clauses")
 
-		p.emitLoop(start) // --> incr, towards the next iteration
-		start = incrStart
+		p.emitLoop(start)     // --> incr, towards the next iteration
 		p.patchJump(bodyJump) // --> body
 	}
 
 	// body
 	p.stmt()
-	p.emitLoop(start) // --> towards incr (if exists, otherwise next iteration)
+	p.emitLoop(*p.loopStart) // --> towards incr (if exists, otherwise next iteration)
 
-	if exitJump != Uninit {
-		p.patchJump(exitJump)    // --> !!cond == false
+	if exitJump != nil {
+		p.patchJump(*exitJump)   // --> !!cond == false
 		p.emitBytes(byte(OpPop)) // Pop the condition.
 	}
+	p.endLoop()
+}
+
+func (p *Parser) breakStmt() {
+	p.consume(TSemi, "expect ';' after 'break'")
+	hole := p.emitJump(OpJump)
+	p.loopEndHoles = append(p.loopEndHoles, hole)
+}
+
+func (p *Parser) continueStmt() {
+	p.consume(TSemi, "expect ';' after 'continue'")
+	p.emitLoop(*p.loopStart)
 }
 
 func (p *Parser) stmt() {
 	switch {
+	case p.isInLoop() && p.match(TBreak):
+		p.breakStmt()
+	case p.isInLoop() && p.match(TContinue):
+		p.continueStmt()
 	case p.match(TPrint):
 		p.printStmt()
 	case p.match(TFor):
@@ -520,7 +541,24 @@ func (p *Parser) varDecl() {
 	}
 }
 
-func (p *Parser) beginScope() { p.depth++ }
+func (p *Parser) beginLoop() (start int) {
+	start = len(p.currentChunk().code)
+	p.loopStart = &start
+	return
+}
+
+func (p *Parser) endLoop() {
+	for _, hole := range p.loopEndHoles {
+		p.patchJump(hole)
+	}
+
+	p.loopStart = nil
+	p.loopEndHoles = []int{}
+	return
+}
+
+func (p *Parser) isInLoop() bool { return p.loopStart != nil }
+func (p *Parser) beginScope()    { p.depth++ }
 
 func (p *Parser) endScope() {
 	p.depth--
