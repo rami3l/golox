@@ -30,8 +30,8 @@ type Compiler struct {
 }
 
 const (
-	GlobalSlot = -1 - iota
-	UninitDepth
+	GlobalSlot = -1
+	Uninit     = -1
 )
 
 func NewCompiler() *Compiler { return &Compiler{} }
@@ -40,7 +40,7 @@ func (c *Compiler) addLocal(name Token) {
 	if len(c.locals) >= math.MaxUint8+1 {
 		logrus.Panicln("too many variables in function")
 	}
-	c.locals = append(c.locals, Local{name, UninitDepth})
+	c.locals = append(c.locals, Local{name, Uninit})
 }
 
 type Local struct {
@@ -98,12 +98,15 @@ func (p *Parser) namedVar(name Token, canAssign bool) {
 	if slot > math.MaxUint8 {
 		logrus.Panicln("scope depth limit exceeded")
 	}
-	var arg byte
-	get, set := OpGetLocal, OpSetLocal
+
+	var (
+		arg      byte
+		get, set OpCode
+	)
 	if slot == GlobalSlot {
 		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
 	} else {
-		arg = byte(slot)
+		arg, get, set = byte(slot), OpGetLocal, OpSetLocal
 	}
 
 	switch {
@@ -166,6 +169,30 @@ func (p *Parser) binary(_canAssign bool) {
 	}
 }
 
+func (p *Parser) and(_canAssign bool) {
+	// If the LHS is falsey, then `LHS and RHS == false`.
+	// So we skip the RHS and leave the LHS as the result.
+	endJump := p.emitJump(OpJumpUnless)
+	// If the LHS is truthy, then `LHS and RHS == RHS`.
+	// So we pop out the LHS.
+	p.emitBytes(byte(OpPop))
+	p.parsePrec(PrecAnd)
+	p.patchJump(endJump)
+}
+
+func (p *Parser) or(_canAssign bool) {
+	// If the LHS is truthy, then `LHS or RHS == true`.
+	// So we skip the RHS and leave the LHS as the result.
+	elseJump := p.emitJump(OpJumpUnless) // <-- else
+	endJump := p.emitJump(OpJump)        // <-- then
+	// If the LHS is falsey, then `LHS or RHS == RHS`.
+	// So we pop out the LHS.
+	p.patchJump(elseJump) // --> else
+	p.emitBytes(byte(OpPop))
+	p.parsePrec(PrecOr)
+	p.patchJump(endJump) // --> then
+}
+
 func (p *Parser) expr() { p.parsePrec(PrecAssign) }
 
 func (p *Parser) exprStmt() {
@@ -206,12 +233,81 @@ func (p *Parser) ifStmt() {
 	p.patchJump(elseJump) // --> `then` branch continues.
 }
 
+func (p *Parser) whileStmt() {
+	start := len(p.currentChunk().code)
+	p.consume(TLParen, "expect '(' after 'while'")
+	p.expr()
+	p.consume(TRParen, "expect ')' after condition")
+
+	exitJump := p.emitJump(OpJumpUnless)
+	p.emitBytes(byte(OpPop)) // Pop the condition.
+	p.stmt()
+	p.emitLoop(start)
+	p.patchJump(exitJump) // Pop the condition.
+	p.emitBytes(byte(OpPop))
+}
+
+func (p *Parser) forStmt() {
+	// for (init; cond; incr) body
+	p.beginScope()
+	defer p.endScope()
+
+	// init
+	p.consume(TLParen, "expect '(' after 'for'")
+	switch {
+	case p.match(TSemi):
+		// Noop.
+	case p.match(TVar):
+		p.varDecl()
+	default:
+		p.exprStmt()
+	}
+
+	// cond
+	start := len(p.currentChunk().code)
+	exitJump := Uninit
+	if !p.match(TSemi) {
+		p.expr()
+		p.consume(TSemi, "expect ';' after loop condition")
+		exitJump = p.emitJump(OpJumpUnless) // <-- !!cond == false
+		p.emitBytes(byte(OpPop))            // Pop the condition.
+	}
+
+	// incr
+	if !p.match(TRParen) {
+		bodyJump := p.emitJump(OpJump)          // <-- body
+		incrStart := len(p.currentChunk().code) // <-- incr
+		// Parse an exprStmt sans the trailing ';'.
+		p.expr()
+		p.emitBytes(byte(OpPop)) // Pure side effect.
+
+		p.consume(TRParen, "expect ')' after for clauses")
+
+		p.emitLoop(start) // --> incr, towards the next iteration
+		start = incrStart
+		p.patchJump(bodyJump) // --> body
+	}
+
+	// body
+	p.stmt()
+	p.emitLoop(start) // --> towards incr (if exists, otherwise next iteration)
+
+	if exitJump != Uninit {
+		p.patchJump(exitJump)    // --> !!cond == false
+		p.emitBytes(byte(OpPop)) // Pop the condition.
+	}
+}
+
 func (p *Parser) stmt() {
 	switch {
 	case p.match(TPrint):
 		p.printStmt()
+	case p.match(TFor):
+		p.forStmt()
 	case p.match(TIf):
 		p.ifStmt()
+	case p.match(TWhile):
+		p.whileStmt()
 	case p.match(TLBrace):
 		p.beginScope()
 		p.block()
@@ -259,8 +355,10 @@ func init() {
 		TIdent:        {(*Parser).var_, nil, PrecNone},
 		TStr:          {(*Parser).str, nil, PrecNone},
 		TNum:          {(*Parser).num, nil, PrecNone},
+		TAnd:          {nil, (*Parser).and, PrecAnd},
 		TFalse:        {(*Parser).lit, nil, PrecNone},
 		TNil:          {(*Parser).lit, nil, PrecNone},
+		TOr:           {nil, (*Parser).or, PrecOr},
 		TTrue:         {(*Parser).lit, nil, PrecNone},
 		TEOF:          {},
 	}
@@ -397,7 +495,7 @@ func (p *Parser) declVar() {
 	// Search for the latest variable declaration of the same name.
 	for i := len(p.locals) - 1; i >= 0; i-- {
 		local := p.locals[i]
-		if local.depth != UninitDepth && local.depth < p.depth {
+		if local.depth != Uninit && local.depth < p.depth {
 			break // Variable shadowing in a deeper scope is allowed.
 		}
 		if name.Eq(local.name) {
@@ -437,7 +535,7 @@ func (p *Parser) resolveLocal(name Token) (slot int) {
 	for i := len(p.locals) - 1; i >= 0; i-- {
 		local := p.locals[i]
 		if name.Eq(local.name) {
-			if local.depth == UninitDepth {
+			if local.depth == Uninit {
 				p.Error("can't read local variable in its own initializer")
 			}
 			return i
@@ -461,6 +559,17 @@ func (p *Parser) patchJump(offset int) {
 		logrus.Panicln("too much code to jump over")
 	}
 	code[offset], code[offset+1] = byte(jump>>8&0xff), byte(jump&0xff)
+}
+
+func (p *Parser) emitLoop(start int) {
+	p.emitBytes(byte(OpLoop))
+	code := p.currentChunk().code
+	// [start] ... [OpLoop@(len-1)] [backJump] [backJump] [CURR@(len+2)]
+	backJump := len(code) + 2 - start // The bytes to jump backwards over.
+	if backJump > math.MaxUint16 {
+		logrus.Panicln("loop body too large")
+	}
+	p.emitBytes(byte(backJump>>8&0xff), byte(backJump&0xff))
 }
 
 /* Precedence */

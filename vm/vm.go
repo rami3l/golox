@@ -201,6 +201,9 @@ func (vm *VM) run() error {
 			if !VTruthy(vm.peek(0)) {
 				vm.ip += int(offset)
 			}
+		case OpLoop:
+			offset := readShort()
+			vm.ip -= int(offset)
 		default:
 			return &e.RuntimeError{
 				Line:   vm.chunk.lines[oldIP],
