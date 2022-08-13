@@ -30,6 +30,7 @@ const (
 	OpJump
 	OpJumpUnless
 	OpLoop
+	OpCall
 )
 
 type Chunk struct {
@@ -64,7 +65,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 
 	switch inst := OpCode(c.code[offset]); inst {
 	// Jump operators.
-	case OpJump, OpJumpUnless, OpLoop:
+	case OpJump, OpJumpUnless, OpLoop: // `jumpInstruction`
 		jump := int(c.code[offset+1])<<8 | int(c.code[offset+2])
 		if inst == OpLoop {
 			jump = -jump
@@ -73,16 +74,16 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 			offset+3+jump)
 		return res, offset + 3
 	// Unary operators.
-	case OpConst:
+	case OpConst: // `constantInstruction`
 		const_ := c.code[offset+1]
 		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2
-	case OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal:
+	case OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpCall: // `byteInstruction`
 		slot := c.code[offset+1]
 		sprintf("%-16s %4d", inst, slot)
 		return res, offset + 2
 	// Nullary operators.
-	default:
+	default: // `simpleInstruction`
 		sprintf("%s", inst)
 		return res, offset + 1
 	}

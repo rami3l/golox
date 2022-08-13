@@ -208,7 +208,7 @@ func (s *Scanner) identType() TokenType {
 			case 'o':
 				return checkKeyword(2, "r", TFor)
 			case 'u':
-				return checkKeyword(2, "r", TFun)
+				return checkKeyword(2, "n", TFun)
 			}
 		}
 	case 'i':
