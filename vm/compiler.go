@@ -317,9 +317,17 @@ func (p *Parser) continueStmt() {
 
 func (p *Parser) stmt() {
 	switch {
-	case p.isInLoop() && p.match(TBreak):
+	case p.match(TBreak):
+		if !p.isInLoop() {
+			p.Error("expect 'break' in a loop")
+			return
+		}
 		p.breakStmt()
-	case p.isInLoop() && p.match(TContinue):
+	case p.match(TContinue):
+		if p.isInLoop() {
+			p.Error("expect 'continue' in a loop")
+			return
+		}
 		p.continueStmt()
 	case p.match(TPrint):
 		p.printStmt()
