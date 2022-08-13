@@ -39,6 +39,30 @@ func (_ VStr) isValue()       {}
 func (_ VStr) isObj()         {}
 func (v VStr) String() string { return fmt.Sprintf(`"%s"`, v.Inner()) }
 
+type VFun struct {
+	name  *string
+	arity int
+	chunk *Chunk
+}
+
+func NewVFun() VFun { return VFun{chunk: NewChunk()} }
+func (v *VFun) Name() string {
+	if v.name == nil {
+		return "?"
+	}
+	return *v.name
+}
+
+func (_ VFun) isValue()       {}
+func (_ VFun) isObj()         {}
+func (v VFun) String() string { return fmt.Sprintf("<fun %s>", v.Name()) }
+
+type VNativeFun func(args ...Value) (res Value, ok bool)
+
+func (_ VNativeFun) isValue()       {}
+func (_ VNativeFun) isObj()         {}
+func (v VNativeFun) String() string { return fmt.Sprintf("<native fun>") }
+
 func VAdd(v, w Value) (res Value, ok bool) {
 	res = NewValue()
 	switch v := v.(type) {

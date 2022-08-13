@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/josharian/intern"
 	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
 	"github.com/sirupsen/logrus"
@@ -14,8 +15,7 @@ import (
 type Parser struct {
 	*Scanner
 	*Compiler
-	prev, curr     Token
-	compilingChunk *Chunk
+	prev, curr Token
 
 	loopStart    *int
 	loopEndHoles []int
@@ -28,16 +28,43 @@ type Parser struct {
 func NewParser() *Parser { return &Parser{} }
 
 type Compiler struct {
-	locals []Local
-	depth  int
+	enclosing *Compiler
+	fun       VFun
+	funType   FunType
+	locals    []Local
+	depth     int
 }
 
+type FunType int
+
+//go:generate stringer -type=FunType
 const (
-	GlobalSlot = -1
-	Uninit     = -1
+	FFun FunType = iota
+	FScript
 )
 
-func NewCompiler() *Compiler { return &Compiler{} }
+func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
+	res := Compiler{
+		enclosing: enclosing,
+		fun:       NewVFun(),
+		funType:   funType,
+		// Reserve the locals slot 0 to indicate the function being called.
+		locals: []Local{{}},
+	}
+	return &res
+}
+
+// wrapCompiler replaces the Compiler with a new one enclosing the current one.
+func (p *Parser) wrapCompiler(funType FunType) {
+	res := NewCompiler(p.Compiler, funType)
+	if funType != FScript {
+		funName := intern.String(p.prev.String())
+		res.fun.name = &funName
+	}
+	p.Compiler = res
+}
+
+const Uninit = -1
 
 func (c *Compiler) addLocal(name Token) {
 	if len(c.locals) >= math.MaxUint8+1 {
@@ -53,10 +80,10 @@ type Local struct {
 
 /* Single-pass compilation */
 
-func (p *Parser) emitConst(val Value) { p.emitBytes(byte(OpConst), p.makeConst(val)) }
+func (p *Parser) emitConst(val Value) { p.emitBytes(byte(OpConst), p.mkConst(val)) }
 
-func (p *Parser) makeConst(val Value) byte {
-	const_ := p.currentChunk().AddConst(val)
+func (p *Parser) mkConst(val Value) byte {
+	const_ := p.currChunk().AddConst(val)
 	if const_ > math.MaxUint8 {
 		logrus.Panicln("too many consts in one chunk")
 	}
@@ -106,7 +133,7 @@ func (p *Parser) namedVar(name Token, canAssign bool) {
 		arg      byte
 		get, set OpCode
 	)
-	if slot == GlobalSlot {
+	if slot == Uninit {
 		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
 	} else {
 		arg, get, set = byte(slot), OpGetLocal, OpSetLocal
@@ -194,6 +221,27 @@ func (p *Parser) or(_canAssign bool) {
 	p.emitBytes(byte(OpPop))
 	p.parsePrec(PrecOr)
 	p.patchJump(endJump) // --> then
+}
+
+func (p *Parser) call(_canAssign bool) {
+	argCount := p.argList()
+	p.emitBytes(byte(OpCall), byte(argCount))
+}
+
+func (p *Parser) argList() (argCount int) {
+	if !p.check(TRParen) {
+		for {
+			p.expr()
+			if argCount++; argCount >= math.MaxUint8 {
+				p.Error("too many arguments")
+			}
+			if !p.match(TComma) {
+				break
+			}
+		}
+	}
+	p.consume(TRParen, "expect ')' after arguments")
+	return
 }
 
 func (p *Parser) expr() { p.parsePrec(PrecAssign) }
@@ -315,6 +363,16 @@ func (p *Parser) continueStmt() {
 	p.emitLoop(*p.loopStart)
 }
 
+func (p *Parser) returnStmt() {
+	if p.match(TSemi) {
+		p.emitReturn()
+		return
+	}
+	p.expr()
+	p.consume(TSemi, "expect ';' after return value")
+	p.emitBytes(byte(OpReturn))
+}
+
 func (p *Parser) stmt() {
 	switch {
 	case p.match(TBreak):
@@ -335,6 +393,12 @@ func (p *Parser) stmt() {
 		p.forStmt()
 	case p.match(TIf):
 		p.ifStmt()
+	case p.match(TReturn):
+		if p.funType == FScript {
+			p.Error("can't return from top-level code")
+			return
+		}
+		p.returnStmt()
 	case p.match(TWhile):
 		p.whileStmt()
 	case p.match(TLBrace):
@@ -346,8 +410,64 @@ func (p *Parser) stmt() {
 	}
 }
 
+func (p *Parser) fun_() {
+	p.wrapCompiler(FFun)
+	p.beginScope()
+
+	p.consume(TLParen, "expect '(' after function name")
+	if !p.check(TRParen) {
+		for {
+			if p.fun.arity++; p.fun.arity > math.MaxUint8 {
+				p.ErrorAtCurr("too many parameters")
+			}
+			param := p.parseVar("expect parameter name")
+			p.defVar(param)
+			if !p.match(TComma) {
+				break
+			}
+		}
+	}
+	p.consume(TRParen, "expect ')' after parameters")
+	p.consume(TLBrace, "expect '{' before function body")
+	p.block()
+
+	// Because we end Compiler completely when we reach the end of the function body,
+	// there’s no need to close the lingering outermost scope
+	fun := p.endCompiler()
+	p.emitBytes(byte(OpConst), p.mkConst(fun))
+}
+
+func (p *Parser) funDecl() {
+	global := p.parseVar("expect function name")
+	validName := p.checkPrev(TIdent)
+	p.fun_()
+
+	// Global functions are immediately initialized and defined.
+	if validName {
+		p.markInit()
+		p.defVar(global)
+	}
+}
+
+func (p *Parser) varDecl() {
+	global := p.parseVar("expect variable name")
+	validName := p.checkPrev(TIdent)
+	switch {
+	case p.match(TEqual):
+		p.expr()
+	default:
+		p.emitBytes(byte(OpNil))
+	}
+	p.consume(TSemi, "expect ';' after variable declaration")
+	if validName {
+		p.defVar(global)
+	}
+}
+
 func (p *Parser) decl() {
 	switch {
+	case p.match(TFun):
+		p.funDecl()
 	case p.match(TVar):
 		p.varDecl()
 	default:
@@ -369,7 +489,7 @@ var parseRules []ParseRule
 
 func init() {
 	parseRules = []ParseRule{
-		TLParen:       {(*Parser).grouping, nil, PrecNone},
+		TLParen:       {(*Parser).grouping, (*Parser).call, PrecCall},
 		TMinus:        {(*Parser).unary, (*Parser).binary, PrecTerm},
 		TPlus:         {nil, (*Parser).binary, PrecTerm},
 		TSlash:        {nil, (*Parser).binary, PrecFactor},
@@ -459,50 +579,62 @@ func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
 
 /* Compiling helpers */
 
-func (p *Parser) Compile(src string, isREPL bool) (res *Chunk, err error) {
+func (p *Parser) Compile(src string, isREPL bool) (res VFun, err error) {
 	res, err = p.compileWithRule(src, func(p *Parser) {
 		for !p.match(TEOF) {
 			p.decl()
 		}
 	})
 	if isREPL && err != nil {
+		declsErr := err
 		p.errors = nil
 		res, err = p.compileWithRule(src, (*Parser).expr)
+		if err != nil {
+			err = fmt.Errorf("%w\ncaused by:\n%s", declsErr, err)
+		}
 	}
 	return
 }
 
-func (p *Parser) compileWithRule(src string, rule func(*Parser)) (res *Chunk, err error) {
-	res = NewChunk()
-	p.compilingChunk = res
-	defer func() { p.compilingChunk = nil }()
-	p.Compiler = NewCompiler()
+func (p *Parser) compileWithRule(src string, rule func(*Parser)) (res VFun, err error) {
+	p.wrapCompiler(FScript)
 	p.Scanner = NewScanner(src)
 
 	p.advance()
 	rule(p)
-	p.endCompiler()
+	res = p.endCompiler()
 	err = p.errors.ErrorOrNil()
 	return
 }
 
-func (p *Parser) currentChunk() *Chunk { return p.compilingChunk }
+func (p *Parser) currChunk() *Chunk { return p.fun.chunk }
 
 func (p *Parser) emitBytes(bs ...byte) {
 	for _, b := range bs {
-		p.currentChunk().Write(b, p.prev.Line)
+		p.currChunk().Write(b, p.prev.Line)
 	}
 }
 
-func (p *Parser) endCompiler() {
-	p.emitBytes(byte(OpReturn))
+func (p *Parser) emitReturn() { p.emitBytes(byte(OpNil), byte(OpReturn)) }
+
+func (p *Parser) endCompiler() (res VFun) {
+	p.emitReturn()
+	res = p.fun
 	if debug.DEBUG {
-		logrus.Debugln(p.currentChunk().Disassemble("endCompiler"))
+		logrus.Debugln(p.currChunk().Disassemble(res.Name()))
 	}
+	p.Compiler = p.Compiler.enclosing
+	return
 }
 
-func (p *Parser) identConst(name *Token) byte { return p.makeConst(NewVStr(name.String())) }
-func (p *Parser) markInit()                   { p.locals[len(p.locals)-1].depth = p.depth }
+func (p *Parser) identConst(name *Token) byte { return p.mkConst(NewVStr(name.String())) }
+
+func (p *Parser) markInit() {
+	if p.depth == 0 {
+		return
+	}
+	p.locals[len(p.locals)-1].depth = p.depth
+}
 
 func (p *Parser) defVar(global *byte) {
 	if global == nil || p.depth > 0 {
@@ -545,23 +677,8 @@ func (p *Parser) declVar() {
 	p.addLocal(name)
 }
 
-func (p *Parser) varDecl() {
-	global := p.parseVar("expect variable name")
-	validName := p.checkPrev(TIdent)
-	switch {
-	case p.match(TEqual):
-		p.expr()
-	default:
-		p.emitBytes(byte(OpNil))
-	}
-	p.consume(TSemi, "expect ';' after variable declaration")
-	if validName {
-		p.defVar(global)
-	}
-}
-
 func (p *Parser) beginLoop() (start int) {
-	start = len(p.currentChunk().code)
+	start = len(p.currChunk().code)
 	p.loopStart = &start
 	return
 }
@@ -598,16 +715,16 @@ func (p *Parser) resolveLocal(name Token) (slot int) {
 			return i
 		}
 	}
-	return GlobalSlot // Global variable.
+	return Uninit // Global variable.
 }
 
 func (p *Parser) emitJump(inst OpCode) (offset int) {
 	p.emitBytes(byte(inst), 0xff, 0xff)
-	return len(p.currentChunk().code) - 2
+	return len(p.currChunk().code) - 2
 }
 
 func (p *Parser) patchJump(offset int) {
-	code := p.currentChunk().code
+	code := p.currChunk().code
 	// A jump uses 2 bytes to encode the offset, so
 	// -2 to adjust for the bytecode for the jump offset itself:
 	// [OpJump] [0xff@offset] [0xff@(offset+1)] [GOAL@(offset+2)] ... [CURR@(len-1)]
@@ -620,7 +737,7 @@ func (p *Parser) patchJump(offset int) {
 
 func (p *Parser) emitLoop(start int) {
 	p.emitBytes(byte(OpLoop))
-	code := p.currentChunk().code
+	code := p.currChunk().code
 	// [start] ... [OpLoop@(len-1)] [backJump] [backJump] [CURR@(len+2)]
 	backJump := len(code) + 2 - start // The bytes to jump backwards over.
 	if backJump > math.MaxUint16 {
@@ -682,7 +799,7 @@ func (p *Parser) ErrorAt(tk Token, reason string) {
 	err := &e.CompilationError{Line: tk.Line, Reason: reason1}
 
 	if debug.DEBUG {
-		logrus.Debugln(p.currentChunk().Disassemble("ErrorAt"))
+		logrus.Debugln(p.currChunk().Disassemble("ErrorAt"))
 		logrus.Debugln(err)
 	}
 

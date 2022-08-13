@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/rami3l/golox/debug"
@@ -11,14 +12,38 @@ import (
 )
 
 type VM struct {
-	chunk   *Chunk
-	ip      int
-	stack   []Value
+	stack   []Value     // Contract: put only Vxxx types and not *Vxxx types.
+	frames  []CallFrame // The call stack.
 	globals map[VStr]Value
 }
 
-func NewVM() *VM { return &VM{globals: map[VStr]Value{}} }
+func NewVM() *VM {
+	// * Note: This deviates from the original implementation because no manual GC is required.
+	return &VM{globals: map[VStr]Value{
+		// Native functions.
+		NewVStr("clock"): VNativeFun(func(_ ...Value) (Value, bool) {
+			return VNum(time.Now().UnixMicro()) * 1e-6, true
+		}),
+	}}
+}
 
+func (vm *VM) frame() *CallFrame { return &vm.frames[len(vm.frames)-1] }
+func (vm *VM) chunk() *Chunk     { return vm.frame().fun.chunk }
+func (vm *VM) ip() *int          { return &vm.frame().ip }
+
+type CallFrame struct {
+	fun *VFun
+	ip  int
+	// A top-justified slice view of the stack, in which `fun` and all of `fun`'s variables live.
+	slots []Value
+}
+
+func NewCallFrame() *CallFrame {
+	fun := NewVFun()
+	return &CallFrame{fun: &fun, slots: []Value{fun}}
+}
+
+// Contract: push only Vxxx types and not *Vxxx types.
 func (vm *VM) push(val Value) {
 	vm.stack = append(vm.stack, val)
 }
@@ -57,7 +82,8 @@ func (vm *VM) REPL() error {
 
 		val, err := vm.Interpret(line, true)
 		if err != nil {
-			logrus.Error(err)
+			logrus.Errorln(err)
+			logrus.Errorln(vm.callTrace())
 		}
 		switch val := val.(type) {
 		case VNil:
@@ -70,23 +96,23 @@ func (vm *VM) REPL() error {
 
 func (vm *VM) Interpret(src string, isREPL bool) (Value, error) {
 	parser := NewParser()
-	chunk, err := parser.Compile(src, isREPL)
+	fun, err := parser.Compile(src, isREPL)
 	if err != nil {
 		return VNil{}, err
 	}
-	vm.chunk = chunk
-	vm.ip = 0
+	vm.push(fun)    // Push the current function to slack slot 0.
+	vm.call(fun, 0) // Set up the call frame for the top-level code.
 	return vm.run()
 }
 
 func (vm *VM) run() (Value, error) {
-	if vm.chunk == nil {
+	if vm.chunk() == nil {
 		return VNil{}, vm.MkError("chunk uninitialized")
 	}
 
 	readByte := func() (res byte) {
-		res = vm.chunk.code[vm.ip]
-		vm.ip++
+		res = vm.chunk().code[*vm.ip()]
+		*vm.ip()++
 		return
 	}
 
@@ -96,29 +122,39 @@ func (vm *VM) run() (Value, error) {
 		return
 	}
 
-	readConst := func() Value { return vm.chunk.consts[readByte()] }
+	readConst := func() Value { return vm.chunk().consts[readByte()] }
 
 	for {
 		if debug.DEBUG {
 			logrus.Debugln(vm.stackTrace())
 		}
-		oldIP := vm.ip
+		oldIP := *vm.ip()
 		if debug.DEBUG {
-			instDump, _ := vm.chunk.DisassembleInst(oldIP)
+			instDump, _ := vm.chunk().DisassembleInst(oldIP)
 			logrus.Debugln(instDump)
 		}
 		switch inst := OpCode(readByte()); inst {
 		case OpReturn:
-			switch len := len(vm.stack); len {
-			case 0:
-				return VNil{}, nil
-			case 1:
-				res := vm.stack[0]
-				vm.stack = vm.stack[:0]
-				return res, nil
-			default:
-				return VNil{}, vm.MkErrorf("too many values in the stack: '%v'", vm.stack)
+			res := vm.pop()
+			frame := vm.frames[len(vm.frames)-1]
+			if vm.frames = vm.frames[:len(vm.frames)-1]; len(vm.frames) == 0 {
+				// Special case for the top-most function.
+				switch len := len(vm.stack); len {
+				case 1:
+					vm.pop() // Pop off the top-most function.
+					return res, nil
+				case 2:
+					res = vm.pop()
+					vm.pop() // Pop off the top-most function.
+					return res, nil
+				default:
+					return VNil{}, vm.MkErrorf("unexpected number of values in the stack: '%v'", vm.stack)
+				}
 			}
+			// Chop off the frame slots from the current stack.
+			vm.stack = vm.stack[:len(vm.stack)-len(frame.slots)]
+			// Put the return value back to the stack top.
+			vm.push(res)
 		case OpConst:
 			vm.push(readConst())
 		case OpNil:
@@ -131,10 +167,10 @@ func (vm *VM) run() (Value, error) {
 			vm.pop()
 		case OpGetLocal:
 			slot := readByte()
-			vm.push(vm.stack[slot])
+			vm.push(vm.frame().slots[slot])
 		case OpSetLocal:
 			slot := readByte()
-			vm.stack[slot] = vm.peek(0)
+			vm.frame().slots[slot] = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetGlobal:
 			name := readConst().(VStr)
@@ -211,28 +247,59 @@ func (vm *VM) run() (Value, error) {
 			fmt.Printf("%s\n", vm.pop())
 		case OpJump:
 			offset := readShort()
-			vm.ip += int(offset)
+			*vm.ip() += int(offset)
 		case OpJumpUnless:
 			offset := readShort()
 			if !VTruthy(vm.peek(0)) {
-				vm.ip += int(offset)
+				*vm.ip() += int(offset)
 			}
 		case OpLoop:
 			offset := readShort()
-			vm.ip -= int(offset)
+			*vm.ip() -= int(offset)
+		case OpCall:
+			argCount := int(readByte())
+			fun := vm.peek(argCount)
+			if ok := vm.call(fun, argCount); !ok {
+				return VNil{}, vm.MkError("can only call functions and classes")
+			}
 		default:
 			return VNil{}, &e.RuntimeError{
-				Line:   vm.chunk.lines[oldIP],
+				Line:   vm.chunk().lines[oldIP],
 				Reason: fmt.Sprintf("unknown instruction '%d'", inst),
 			}
 		}
 	}
 }
 
+func (vm *VM) call(callee Value, argCount int) (ok bool) {
+	switch callee := callee.(type) {
+	case VFun:
+		if argCount != callee.arity {
+			vm.MkErrorf("expected %d arguments but got %d",
+				callee.arity, argCount)
+			return false
+		}
+		// * NOTE: We could also add a stack overflow check here.
+		vm.frames = append(vm.frames, CallFrame{
+			fun:   &callee,
+			slots: vm.stack[len(vm.stack)-argCount-1:],
+		})
+		return true
+	case VNativeFun:
+		res, ok := callee(vm.stack[len(vm.stack)-argCount-1:]...)
+		// Chop off the frame slots and the function slot from the current stack.
+		vm.stack = vm.stack[:len(vm.stack)-argCount-1]
+		vm.push(res)
+		return ok
+	default:
+		return false
+	}
+}
+
 func (vm *VM) MkError(reason string) *e.RuntimeError {
 	err := &e.RuntimeError{Reason: reason}
-	if vm.chunk != nil {
-		err.Line = vm.chunk.lines[vm.ip]
+	if vm.chunk() != nil {
+		err.Line = vm.chunk().lines[*vm.ip()]
 	}
 	return err
 }
@@ -251,4 +318,20 @@ func (vm *VM) stackTrace() string {
 		res += fmt.Sprintf("[ %s ]", slot)
 	}
 	return res
+}
+
+func (vm *VM) callTrace() (res string) {
+	res = "call trace:"
+	for i := len(vm.frames) - 1; i >= 0; i-- {
+		frame := &vm.frames[i]
+		fun := frame.fun
+		res += fmt.Sprintf(
+			"\n          [L%d] in %s()",
+			// The - 1 is because the IP is already sitting on the next instruction to be executed,
+			// but we want the stack trace to point to the previous failed instruction.
+			fun.chunk.lines[frame.ip-1],
+			fun.Name(),
+		)
+	}
+	return
 }
