@@ -637,9 +637,10 @@ func (p *Parser) sync() {
 		switch p.curr.Type {
 		case TClass, TFun, TVar, TFor, TIf, TWhile, TPrint, TReturn:
 			return
+		default:
+			p.advance()
 		}
 	}
-	p.advance()
 }
 
 func (p *Parser) ErrorAt(tk Token, reason string) {
