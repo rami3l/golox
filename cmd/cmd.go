@@ -49,8 +49,12 @@ func appMain(args []string) error {
 		if err != nil {
 			return err
 		}
-		return vm_.Interpret(string(src))
+		_, err = vm_.Interpret(string(src), false)
+		if err != nil {
+			return err
+		}
 	default:
 		panic(e.Unreachable)
 	}
+	return nil
 }

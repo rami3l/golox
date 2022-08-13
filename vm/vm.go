@@ -55,26 +55,33 @@ func (vm *VM) REPL() error {
 			return err
 		}
 
-		if err := vm.Interpret(line); err != nil {
+		val, err := vm.Interpret(line, true)
+		if err != nil {
 			logrus.Error(err)
+		}
+		switch val := val.(type) {
+		case VNil:
+			// Noop.
+		default:
+			fmt.Printf("<< %s\n", val)
 		}
 	}
 }
 
-func (vm *VM) Interpret(src string) error {
+func (vm *VM) Interpret(src string, isREPL bool) (Value, error) {
 	parser := NewParser()
-	chunk, err := parser.Compile(src)
+	chunk, err := parser.Compile(src, isREPL)
 	if err != nil {
-		return err
+		return VNil{}, err
 	}
 	vm.chunk = chunk
 	vm.ip = 0
 	return vm.run()
 }
 
-func (vm *VM) run() error {
+func (vm *VM) run() (Value, error) {
 	if vm.chunk == nil {
-		return vm.MkError("chunk uninitialized")
+		return VNil{}, vm.MkError("chunk uninitialized")
 	}
 
 	readByte := func() (res byte) {
@@ -102,7 +109,16 @@ func (vm *VM) run() error {
 		}
 		switch inst := OpCode(readByte()); inst {
 		case OpReturn:
-			return nil
+			switch len := len(vm.stack); len {
+			case 0:
+				return VNil{}, nil
+			case 1:
+				res := vm.stack[0]
+				vm.stack = vm.stack[:0]
+				return res, nil
+			default:
+				return VNil{}, vm.MkErrorf("too many values in the stack: '%v'", vm.stack)
+			}
 		case OpConst:
 			vm.push(readConst())
 		case OpNil:
@@ -124,7 +140,7 @@ func (vm *VM) run() error {
 			name := readConst().(VStr)
 			val, ok := vm.globals[name]
 			if !ok {
-				return vm.MkErrorf("undefined variable '%v'", name)
+				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
 			vm.push(val)
 		case OpDefGlobal:
@@ -134,7 +150,7 @@ func (vm *VM) run() error {
 		case OpSetGlobal:
 			name := readConst().(VStr)
 			if _, ok := vm.globals[name]; !ok {
-				return vm.MkErrorf("undefined variable '%v'", name)
+				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
 			vm.globals[name] = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
@@ -145,14 +161,14 @@ func (vm *VM) run() error {
 			rhs := vm.pop()
 			res, ok := VGreater(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be numbers")
+				return VNil{}, vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpLess:
 			rhs := vm.pop()
 			res, ok := VLess(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be numbers")
+				return VNil{}, vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpNot:
@@ -160,35 +176,35 @@ func (vm *VM) run() error {
 		case OpNeg:
 			res, ok := VNeg(vm.pop())
 			if !ok {
-				return vm.MkError("operand must be a number")
+				return VNil{}, vm.MkError("operand must be a number")
 			}
 			vm.push(res)
 		case OpAdd:
 			rhs := vm.pop()
 			res, ok := VAdd(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be all numbers or all strings")
+				return VNil{}, vm.MkError("operands must be all numbers or all strings")
 			}
 			vm.push(res)
 		case OpSub:
 			rhs := vm.pop()
 			res, ok := VSub(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be numbers")
+				return VNil{}, vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpMul:
 			rhs := vm.pop()
 			res, ok := VMul(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be numbers")
+				return VNil{}, vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpDiv:
 			rhs := vm.pop()
 			res, ok := VDiv(vm.pop(), rhs)
 			if !ok {
-				return vm.MkError("operands must be numbers")
+				return VNil{}, vm.MkError("operands must be numbers")
 			}
 			vm.push(res)
 		case OpPrint:
@@ -205,7 +221,7 @@ func (vm *VM) run() error {
 			offset := readShort()
 			vm.ip -= int(offset)
 		default:
-			return &e.RuntimeError{
+			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk.lines[oldIP],
 				Reason: fmt.Sprintf("unknown instruction '%d'", inst),
 			}

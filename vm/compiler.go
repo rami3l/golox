@@ -459,7 +459,20 @@ func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
 
 /* Compiling helpers */
 
-func (p *Parser) Compile(src string) (res *Chunk, err error) {
+func (p *Parser) Compile(src string, isREPL bool) (res *Chunk, err error) {
+	res, err = p.compileWithRule(src, func(p *Parser) {
+		for !p.match(TEOF) {
+			p.decl()
+		}
+	})
+	if isREPL && err != nil {
+		p.errors = nil
+		res, err = p.compileWithRule(src, (*Parser).expr)
+	}
+	return
+}
+
+func (p *Parser) compileWithRule(src string, rule func(*Parser)) (res *Chunk, err error) {
 	res = NewChunk()
 	p.compilingChunk = res
 	defer func() { p.compilingChunk = nil }()
@@ -467,9 +480,7 @@ func (p *Parser) Compile(src string) (res *Chunk, err error) {
 	p.Scanner = NewScanner(src)
 
 	p.advance()
-	for !p.match(TEOF) {
-		p.decl()
-	}
+	rule(p)
 	p.endCompiler()
 	err = p.errors.ErrorOrNil()
 	return
@@ -561,7 +572,7 @@ func (p *Parser) endLoop() {
 	}
 
 	p.loopStart = nil
-	p.loopEndHoles = []int{}
+	p.loopEndHoles = p.loopEndHoles[:0]
 	return
 }
 
