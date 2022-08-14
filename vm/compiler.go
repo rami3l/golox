@@ -294,10 +294,10 @@ func (p *Parser) whileStmt() {
 	p.emitBytes(byte(OpPop)) // Pop the condition.
 	p.stmt()
 	p.emitLoop(*p.loopStart)
-	p.endLoop()
 
 	p.patchJump(exitJump) // Pop the condition.
 	p.emitBytes(byte(OpPop))
+	p.endLoop()
 }
 
 func (p *Parser) forStmt() {
@@ -382,7 +382,7 @@ func (p *Parser) stmt() {
 		}
 		p.breakStmt()
 	case p.match(TContinue):
-		if p.isInLoop() {
+		if !p.isInLoop() {
 			p.Error("expect 'continue' in a loop")
 			return
 		}
