@@ -27,20 +27,24 @@ func NewVM() *VM {
 	}}
 }
 
-func (vm *VM) frame() *CallFrame { return &vm.frames[len(vm.frames)-1] }
-func (vm *VM) chunk() *Chunk     { return vm.frame().fun.chunk }
-func (vm *VM) ip() *int          { return &vm.frame().ip }
+func (vm *VM) frame() *CallFrame     { return &vm.frames[len(vm.frames)-1] }
+func (vm *VM) slotAt(idx int) *Value { return &vm.stack[vm.frame().base+idx] }
+func (vm *VM) chunk() *Chunk         { return vm.frame().fun.chunk }
+func (vm *VM) ip() *int              { return &vm.frame().ip }
 
 type CallFrame struct {
 	fun *VFun
 	ip  int
-	// A top-justified slice view of the stack, in which `fun` and all of `fun`'s variables live.
-	slots []Value
+	// base is the leftmost index of slots.
+	// Slots conceptually represent a top-justified slice view of the stack,
+	// in which `fun` and all of `fun`'s variables live.
+	// Thus, base is also the index at which `fun` is found in the stack.
+	base int
 }
 
 func NewCallFrame() *CallFrame {
 	fun := NewVFun()
-	return &CallFrame{fun: &fun, slots: []Value{fun}}
+	return &CallFrame{fun: &fun}
 }
 
 // Contract: push only Vxxx types and not *Vxxx types.
@@ -85,16 +89,11 @@ func (vm *VM) REPL() error {
 			logrus.Errorln(err)
 			logrus.Errorln(vm.callTrace())
 		}
-		switch val := val.(type) {
-		case VNil:
-			// Noop.
-		default:
-			fmt.Printf("<< %s\n", val)
-		}
+		fmt.Printf("<< %s\n", val)
 	}
 }
 
-func (vm *VM) Interpret(src string, isREPL bool) (Value, error) {
+func (vm *VM) Interpret(src string, isREPL bool) (res Value, err error) {
 	parser := NewParser()
 	fun, err := parser.Compile(src, isREPL)
 	if err != nil {
@@ -107,7 +106,7 @@ func (vm *VM) Interpret(src string, isREPL bool) (Value, error) {
 
 func (vm *VM) run() (Value, error) {
 	if vm.chunk() == nil {
-		return VNil{}, vm.MkError("chunk uninitialized")
+		return nil, vm.MkError("chunk uninitialized")
 	}
 
 	readByte := func() (res byte) {
@@ -122,7 +121,13 @@ func (vm *VM) run() (Value, error) {
 		return
 	}
 
-	readConst := func() Value { return vm.chunk().consts[readByte()] }
+	readConst := func() (res Value) {
+		res = vm.chunk().consts[readByte()]
+		if debug.DEBUG {
+			logrus.Debugf("          readConst %11s", res)
+		}
+		return
+	}
 
 	for {
 		if debug.DEBUG {
@@ -152,7 +157,7 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			// Chop off the frame slots from the current stack.
-			vm.stack = vm.stack[:len(vm.stack)-len(frame.slots)]
+			vm.stack = vm.stack[:frame.base]
 			// Put the return value back to the stack top.
 			vm.push(res)
 		case OpConst:
@@ -166,11 +171,11 @@ func (vm *VM) run() (Value, error) {
 		case OpPop:
 			vm.pop()
 		case OpGetLocal:
-			slot := readByte()
-			vm.push(vm.frame().slots[slot])
+			slot := int(readByte())
+			vm.push(*vm.slotAt(slot))
 		case OpSetLocal:
-			slot := readByte()
-			vm.frame().slots[slot] = vm.peek(0)
+			slot := int(readByte())
+			*vm.slotAt(slot) = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetGlobal:
 			name := readConst().(VStr)
@@ -281,8 +286,8 @@ func (vm *VM) call(callee Value, argCount int) (ok bool) {
 		}
 		// * NOTE: We could also add a stack overflow check here.
 		vm.frames = append(vm.frames, CallFrame{
-			fun:   &callee,
-			slots: vm.stack[len(vm.stack)-argCount-1:],
+			fun:  &callee,
+			base: len(vm.stack) - argCount - 1,
 		})
 		return true
 	case VNativeFun:
