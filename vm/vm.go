@@ -8,11 +8,12 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
+	"github.com/rami3l/golox/utils"
 	"github.com/sirupsen/logrus"
 )
 
 type VM struct {
-	stack   []Value     // Contract: put only Vxxx types and not *Vxxx types.
+	stack   []Value
 	frames  []CallFrame // The call stack.
 	globals map[VStr]Value
 }
@@ -21,20 +22,50 @@ func NewVM() *VM {
 	// * Note: This deviates from the original implementation because no manual GC is required.
 	return &VM{globals: map[VStr]Value{
 		// Native functions.
-		NewVStr("clock"): VNativeFun(func(_ ...Value) (Value, bool) {
+		*NewVStr("clock"): NewVNativeFun(func(_ ...Value) (Value, bool) {
 			return VNum(time.Now().UnixMicro()) * 1e-6, true
 		}),
 	}}
 }
 
-func (vm *VM) frame() *CallFrame     { return &vm.frames[len(vm.frames)-1] }
-func (vm *VM) slotAt(idx int) *Value { return &vm.stack[vm.frame().base+idx] }
-func (vm *VM) chunk() *Chunk         { return vm.frame().fun.chunk }
-func (vm *VM) ip() *int              { return &vm.frame().ip }
+func (vm *VM) frame() *CallFrame {
+	if len(vm.frames) == 0 {
+		return nil
+	}
+	return &vm.frames[len(vm.frames)-1]
+}
+
+func (vm *VM) slotAt(idx int) *Value {
+	frame := vm.frame()
+	if frame == nil {
+		return nil
+	}
+	idx1 := frame.base + idx
+	if idx1 >= len(vm.stack) {
+		return nil
+	}
+	return &vm.stack[idx1]
+}
+
+func (vm *VM) chunk() *Chunk {
+	frame := vm.frame()
+	if frame == nil || frame.clos == nil {
+		return nil
+	}
+	return vm.frame().clos.fun.chunk
+}
+
+func (vm *VM) ip() *int {
+	frame := vm.frame()
+	if frame == nil {
+		return nil
+	}
+	return &frame.ip
+}
 
 type CallFrame struct {
-	fun *VFun
-	ip  int
+	clos *VClos
+	ip   int
 	// base is the leftmost index of slots.
 	// Slots conceptually represent a top-justified slice view of the stack,
 	// in which `fun` and all of `fun`'s variables live.
@@ -42,24 +73,17 @@ type CallFrame struct {
 	base int
 }
 
-func NewCallFrame() *CallFrame {
-	fun := NewVFun()
-	return &CallFrame{fun: &fun}
-}
+func (vm *VM) peek(distance int) Value { return vm.stack[len(vm.stack)-1-distance] }
 
-// Contract: push only Vxxx types and not *Vxxx types.
-func (vm *VM) push(val Value) {
+func (vm *VM) push(val Value) (last *Value) {
 	vm.stack = append(vm.stack, val)
+	return &vm.stack[len(vm.stack)-1]
 }
 
 func (vm *VM) pop() (last Value) {
 	len_ := len(vm.stack)
 	vm.stack, last = vm.stack[:len_-1], vm.stack[len_-1]
 	return
-}
-
-func (vm *VM) peek(distance int) Value {
-	return vm.stack[len(vm.stack)-1-distance]
 }
 
 func (vm *VM) REPL() error {
@@ -96,11 +120,12 @@ func (vm *VM) REPL() error {
 func (vm *VM) Interpret(src string, isREPL bool) (res Value, err error) {
 	parser := NewParser()
 	fun, err := parser.Compile(src, isREPL)
+	clos := NewVClos(fun)
 	if err != nil {
 		return VNil{}, err
 	}
-	vm.push(fun)    // Push the current function to slack slot 0.
-	vm.call(fun, 0) // Set up the call frame for the top-level code.
+	vm.push(clos)    // Push the current function to slack slot 0.
+	vm.call(clos, 0) // Set up the call frame for the top-level code.
 	return vm.run()
 }
 
@@ -178,22 +203,29 @@ func (vm *VM) run() (Value, error) {
 			*vm.slotAt(slot) = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetGlobal:
-			name := readConst().(VStr)
+			name := *readConst().(*VStr)
 			val, ok := vm.globals[name]
 			if !ok {
 				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
 			vm.push(val)
 		case OpDefGlobal:
-			name := readConst().(VStr)
+			name := *readConst().(*VStr)
 			vm.globals[name] = vm.peek(0)
 			vm.pop()
 		case OpSetGlobal:
-			name := readConst().(VStr)
+			name := *readConst().(*VStr)
 			if _, ok := vm.globals[name]; !ok {
 				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
 			vm.globals[name] = vm.peek(0)
+			// Don't pop, since the set operation has the RHS as its return value.
+		case OpGetUpval:
+			slot := int(readByte())
+			vm.push(vm.frame().clos.upvals[slot].Value)
+		case OpSetUpval:
+			slot := int(readByte())
+			vm.frame().clos.upvals[slot].Value = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpEqual:
 			rhs := vm.pop()
@@ -267,6 +299,20 @@ func (vm *VM) run() (Value, error) {
 			if ok := vm.call(fun, argCount); !ok {
 				return VNil{}, vm.MkError("can only call functions and classes")
 			}
+		case OpClos:
+			fun := readConst().(*VFun)
+			clos := NewVClos(fun)
+			upvals := clos.upvals
+			vm.push(clos)
+			for i := range upvals { // ! Here we use the index only.
+				isLocal := utils.IntToBool(readByte())
+				idx := int(readByte())
+				if isLocal {
+					upvals[i] = vm.captureUpval(*vm.slotAt(idx))
+				} else {
+					upvals[i] = vm.frame().clos.upvals[idx]
+				}
+			}
 		default:
 			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk().lines[oldIP],
@@ -277,19 +323,12 @@ func (vm *VM) run() (Value, error) {
 }
 
 func (vm *VM) call(callee Value, argCount int) (ok bool) {
-	base := len(vm.stack) - argCount - 1
 	switch callee := callee.(type) {
-	case VFun:
-		if argCount != callee.arity {
-			vm.MkErrorf("expected %d arguments but got %d",
-				callee.arity, argCount)
-			return false
-		}
-		// * NOTE: We could also add a stack overflow check here.
-		vm.frames = append(vm.frames, CallFrame{fun: &callee, base: base})
-		return true
-	case VNativeFun:
-		res, ok := callee(vm.stack[base:]...)
+	case *VClos:
+		return vm.callClos(callee, argCount)
+	case *VNativeFun:
+		base := len(vm.stack) - argCount - 1
+		res, ok := (*callee)(vm.stack[base:]...)
 		// Chop off the frame slots and the function slot from the current stack.
 		vm.stack = vm.stack[:base]
 		vm.push(res)
@@ -298,6 +337,20 @@ func (vm *VM) call(callee Value, argCount int) (ok bool) {
 		return false
 	}
 }
+
+func (vm *VM) callClos(clos *VClos, argCount int) (ok bool) {
+	base := len(vm.stack) - argCount - 1
+	if argCount != clos.fun.arity {
+		vm.MkErrorf("expected %d arguments but got %d",
+			clos.fun.arity, argCount)
+		return false
+	}
+	// * NOTE: We could also add a stack overflow check here.
+	vm.frames = append(vm.frames, CallFrame{clos: clos, base: base})
+	return true
+}
+
+func (vm *VM) captureUpval(val Value) *VUpval { return NewVUpval(val) }
 
 func (vm *VM) MkError(reason string) *e.RuntimeError {
 	err := &e.RuntimeError{Reason: reason}
@@ -327,13 +380,13 @@ func (vm *VM) callTrace() (res string) {
 	res = "call trace:"
 	for i := len(vm.frames) - 1; i >= 0; i-- {
 		frame := &vm.frames[i]
-		fun := frame.fun
+		clos := frame.clos
 		res += fmt.Sprintf(
 			"\n          [L%d] in %s()",
 			// The - 1 is because the IP is already sitting on the next instruction to be executed,
 			// but we want the stack trace to point to the previous failed instruction.
-			fun.chunk.lines[frame.ip-1],
-			fun.Name(),
+			clos.fun.chunk.lines[frame.ip-1],
+			clos.fun.Name(),
 		)
 	}
 	return

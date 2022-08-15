@@ -39,21 +39,21 @@ func TestCalculator(t *testing.T) {
 		{"-6 *(-4+ -3) == 6*4 + 2  *((((9))))", "true"},
 		{
 			heredoc.Doc(`
-                4/1 - 4/3 + 4/5 - 4/7 + 4/9 - 4/11 
-                    + 4/13 - 4/15 + 4/17 - 4/19 + 4/21 - 4/23
-            `),
+				4/1 - 4/3 + 4/5 - 4/7 + 4/9 - 4/11 
+					+ 4/13 - 4/15 + 4/17 - 4/19 + 4/21 - 4/23
+			`),
 			"3.058402765927333",
 		},
 		{
 			heredoc.Doc(`
-                3
-                    + 4/(2*3*4)
-                    - 4/(4*5*6)
-                    + 4/(6*7*8)
-                    - 4/(8*9*10)
-                    + 4/(10*11*12)
-                    - 4/(12*13*14)
-            `),
+				3
+					+ 4/(2*3*4)
+					- 4/(4*5*6)
+					+ 4/(6*7*8)
+					- 4/(8*9*10)
+					+ 4/(10*11*12)
+					- 4/(12*13*14)
+			`),
 			"3.1408813408813407",
 		},
 	}...)
@@ -152,18 +152,16 @@ func TestWhileJump(t *testing.T) {
 		{"var i = 1; var product = 1;", "nil"},
 		{
 			heredoc.Doc(`
-                while (true) {
-                    if (i == 3 or i == 5) {
-                        i = i + 1;
-                        continue;
-                    }
-                    product = product * i;
-                    i = i + 1;
-                    if (i > 6) {
-                        break;
-                    }
-                }
-            `),
+				while (true) {
+					if (i == 3 or i == 5) {
+						i = i + 1;
+						continue;
+					}
+					product = product * i;
+					i = i + 1;
+					if (i > 6) { break; }
+				}
+			`),
 			"nil",
 		},
 		{"product", "48"},
@@ -205,5 +203,22 @@ func TestForContinue(t *testing.T) {
 		},
 		{"i", "5"},
 		{"product", "120"},
+	}...)
+}
+
+func TestClosureNoEscape(t *testing.T) {
+	t.Parallel()
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				fun outer() {
+					var x = "outside";
+					fun inner() { return x; }
+					return inner();
+				}
+			`),
+			"nil",
+		},
+		{"outer()", `"outside"`},
 	}...)
 }

@@ -1,6 +1,10 @@
 package vm
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rami3l/golox/utils"
+)
 
 //go:generate stringer -type=OpCode
 type OpCode byte
@@ -17,6 +21,8 @@ const (
 	OpGetGlobal
 	OpDefGlobal
 	OpSetGlobal
+	OpGetUpval
+	OpSetUpval
 	OpEqual
 	OpGreater
 	OpLess
@@ -31,6 +37,7 @@ const (
 	OpJumpUnless
 	OpLoop
 	OpCall
+	OpClos
 )
 
 type Chunk struct {
@@ -54,37 +61,56 @@ func (c *Chunk) AddConst(const_ Value) (idx int) {
 }
 
 func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
-	sprintf := func(format string, a ...any) { res += fmt.Sprintf(format, a...) }
+	appendf := func(format string, a ...any) { res += fmt.Sprintf(format, a...) }
 
-	sprintf("%04d ", offset)
+	appendf("%04d ", offset)
 	if offset > 0 && c.lines[offset] == c.lines[offset-1] {
-		sprintf("   | ")
+		appendf("   | ")
 	} else {
-		sprintf("%4d ", c.lines[offset])
+		appendf("%4d ", c.lines[offset])
 	}
 
 	switch inst := OpCode(c.code[offset]); inst {
+	case OpClos:
+		const_ := c.code[offset+1]
+		offset += 2
+		fun := c.consts[const_].(*VFun)
+		appendf("%-16s %4d %s", inst, const_, fun)
+		for i := 0; i < fun.upvalCount; i++ {
+			isLocal, idx := utils.IntToBool(c.code[offset]), c.code[offset+1]
+			isLocalStr := "upvalue"
+			if isLocal {
+				isLocalStr = "local"
+			}
+			appendf(
+				"\n%04d    |                     %s %d",
+				offset, isLocalStr, idx,
+			)
+			offset += 2
+		}
+		return res, offset
 	// Jump operators.
 	case OpJump, OpJumpUnless, OpLoop: // `jumpInstruction`
 		jump := int(c.code[offset+1])<<8 | int(c.code[offset+2])
 		if inst == OpLoop {
 			jump = -jump
 		}
-		sprintf("%-16s %4d -> %d", inst, offset,
+		appendf("%-16s %4d -> %d", inst, offset,
 			offset+3+jump)
 		return res, offset + 3
 	// Unary operators.
 	case OpConst: // `constantInstruction`
 		const_ := c.code[offset+1]
-		sprintf("%-16s %4d '%s'", inst, const_, c.consts[const_])
+		appendf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2
-	case OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpCall: // `byteInstruction`
+	case OpGetLocal, OpSetLocal, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpCall,
+		OpGetUpval, OpSetUpval: // `byteInstruction`
 		slot := c.code[offset+1]
-		sprintf("%-16s %4d", inst, slot)
+		appendf("%-16s %4d", inst, slot)
 		return res, offset + 2
 	// Nullary operators.
 	default: // `simpleInstruction`
-		sprintf("%s", inst)
+		appendf("%s", inst)
 		return res, offset + 1
 	}
 }

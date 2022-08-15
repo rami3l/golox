@@ -9,7 +9,9 @@ import (
 	"github.com/josharian/intern"
 	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
+	"github.com/rami3l/golox/utils"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 )
 
 type Parser struct {
@@ -27,13 +29,25 @@ type Parser struct {
 
 func NewParser() *Parser { return &Parser{} }
 
-type Compiler struct {
-	enclosing *Compiler
-	fun       VFun
-	funType   FunType
-	locals    []Local
-	depth     int
-}
+type (
+	Compiler struct {
+		enclosing *Compiler
+		fun       *VFun
+		funType   FunType
+		locals    []Local
+		upvals    []Upval
+		depth     int
+	}
+
+	Local struct {
+		name  Token
+		depth int
+	}
+	Upval struct {
+		isLocal bool // Whether the upval is captured from local or from an existing upval in the outer function.
+		idx     int  // The index at which the actual value can be found in the VM stack.
+	}
+)
 
 type FunType int
 
@@ -44,14 +58,13 @@ const (
 )
 
 func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
-	res := Compiler{
+	return &Compiler{
 		enclosing: enclosing,
 		fun:       NewVFun(),
 		funType:   funType,
 		// Reserve the locals slot 0 to indicate the function being called.
 		locals: []Local{{}},
 	}
-	return &res
 }
 
 // wrapCompiler replaces the Compiler with a new one enclosing the current one.
@@ -66,16 +79,26 @@ func (p *Parser) wrapCompiler(funType FunType) {
 
 const Uninit = -1
 
-func (c *Compiler) addLocal(name Token) {
+func (c *Compiler) addLocal(name Token) (idx int) {
 	if len(c.locals) >= math.MaxUint8+1 {
 		logrus.Panicln("too many variables in function")
 	}
 	c.locals = append(c.locals, Local{name, Uninit})
+	return len(c.locals) - 1
 }
 
-type Local struct {
-	name  Token
-	depth int
+func (c *Compiler) addUpval(upval Upval) (idx int) {
+	if idx = slices.Index(c.upvals, upval); idx != -1 {
+		return // Reuse existing upval.
+	}
+	oldLen := len(c.upvals)
+	if oldLen >= math.MaxUint8 {
+		logrus.Panicln("too many closure variables in function")
+	}
+	c.upvals = append(c.upvals, upval)
+	c.fun.upvalCount++
+	debug.AssertEq(len(c.upvals), c.fun.upvalCount)
+	return oldLen
 }
 
 /* Single-pass compilation */
@@ -133,10 +156,15 @@ func (p *Parser) namedVar(name Token, canAssign bool) {
 		arg      byte
 		get, set OpCode
 	)
-	if slot == Uninit {
-		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
-	} else {
+	if slot != Uninit {
+		// name is a local variable.
 		arg, get, set = byte(slot), OpGetLocal, OpSetLocal
+	} else if slot = p.resolveUpval(name); slot != Uninit {
+		// name is captured by the current closure.
+		arg, get, set = byte(slot), OpGetUpval, OpSetUpval
+	} else {
+		// name is a global variable.
+		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
 	}
 
 	switch {
@@ -433,8 +461,12 @@ func (p *Parser) fun_() {
 
 	// Because we end Compiler completely when we reach the end of the function body,
 	// there’s no need to close the lingering outermost scope
-	fun := p.endCompiler()
-	p.emitBytes(byte(OpConst), p.mkConst(fun))
+	fun, upvals := p.endCompiler()
+	p.emitBytes(byte(OpClos), p.mkConst(fun))
+	debug.AssertEq(len(upvals), fun.upvalCount)
+	for _, upval := range upvals {
+		p.emitBytes(utils.BoolToInt[byte](upval.isLocal), byte(upval.idx))
+	}
 }
 
 func (p *Parser) funDecl() {
@@ -579,7 +611,7 @@ func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
 
 /* Compiling helpers */
 
-func (p *Parser) Compile(src string, isREPL bool) (res VFun, err error) {
+func (p *Parser) Compile(src string, isREPL bool) (res *VFun, err error) {
 	res, err = p.compileWithRule(src, func(p *Parser) {
 		for !p.match(TEOF) {
 			p.decl()
@@ -596,13 +628,13 @@ func (p *Parser) Compile(src string, isREPL bool) (res VFun, err error) {
 	return
 }
 
-func (p *Parser) compileWithRule(src string, rule func(*Parser)) (res VFun, err error) {
+func (p *Parser) compileWithRule(src string, rule func(*Parser)) (res *VFun, err error) {
 	p.wrapCompiler(FScript)
 	p.Scanner = NewScanner(src)
 
 	p.advance()
 	rule(p)
-	res = p.endCompiler()
+	res, _ = p.endCompiler()
 	err = p.errors.ErrorOrNil()
 	return
 }
@@ -617,11 +649,11 @@ func (p *Parser) emitBytes(bs ...byte) {
 
 func (p *Parser) emitReturn() { p.emitBytes(byte(OpNil), byte(OpReturn)) }
 
-func (p *Parser) endCompiler() (res VFun) {
+func (p *Parser) endCompiler() (fun *VFun, upvals []Upval) {
 	p.emitReturn()
-	res = p.fun
+	fun, upvals = p.fun, p.upvals
 	if debug.DEBUG {
-		logrus.Debugln(p.currChunk().Disassemble(res.Name()))
+		logrus.Debugln(p.currChunk().Disassemble(fun.Name()))
 	}
 	p.Compiler = p.Compiler.enclosing
 	return
@@ -655,8 +687,7 @@ func (p *Parser) parseVar(errorMsg string) *byte {
 	if p.depth > 0 {
 		return nil // Local vars are not resolved using `identConst`, but stay on the stack.
 	}
-	res := p.identConst(target)
-	return &res
+	return utils.Ref(p.identConst(target))
 }
 
 func (p *Parser) declVar() {
@@ -704,18 +735,37 @@ func (p *Parser) endScope() {
 	}
 }
 
-func (p *Parser) resolveLocal(name Token) (slot int) {
+func (c *Compiler) resolveLocal(name Token) (slot int, ok bool) {
 	// Search for the latest variable declaration of the same name.
-	for i := len(p.locals) - 1; i >= 0; i-- {
-		local := p.locals[i]
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		local := c.locals[i]
 		if name.Eq(local.name) {
-			if local.depth == Uninit {
-				p.Error("can't read local variable in its own initializer")
-			}
-			return i
+			return i, local.depth != Uninit
 		}
 	}
-	return Uninit // Global variable.
+	return Uninit, true // Global variable.
+}
+
+func (p *Parser) resolveLocal(name Token) (slot int) {
+	slot, ok := p.Compiler.resolveLocal(name)
+	if !ok {
+		p.Error("can't read local variable in its own initializer")
+	}
+	return slot
+}
+
+func (c *Compiler) resolveUpval(name Token) (slot int) {
+	slot = Uninit
+	if c.enclosing == nil {
+		return // No outer function to capture from.
+	}
+	if local, ok := c.enclosing.resolveLocal(name); ok && local != Uninit {
+		return c.addUpval(Upval{isLocal: true, idx: local}) // Variable captured from local.
+	}
+	if upval := c.enclosing.resolveUpval(name); upval != Uninit {
+		return c.addUpval(Upval{isLocal: false, idx: upval}) // Variable captured from an existing upval in the outer function.
+	}
+	return // Give up resolution.
 }
 
 func (p *Parser) emitJump(inst OpCode) (offset int) {
