@@ -60,11 +60,26 @@ func (_ *VFun) isValue()      {}
 func (_ *VFun) isObj()        {}
 func (v VFun) String() string { return fmt.Sprintf("<fun %s>", v.Name()) }
 
-type VUpval struct{ Value }
+type VUpval struct {
+	val *Value
+	// The index at which val can be found in the stack if it is still open.
+	// If it is closed, idx should be nil.
+	idx *int
+	// The next pointer of an intrusive linked list of open VUpvals, required for escape analysis.
+	next *VUpval
+}
 
-func NewVUpval(val Value) *VUpval { return &VUpval{Value: val} }
+func NewVUpval(val *Value, idx int) *VUpval { return &VUpval{val: val, idx: utils.Ref(idx)} }
 
-func (v VUpval) String() string { return fmt.Sprintf("upvalue(%s)", v.Value) }
+func (_ *VUpval) isValue() {}
+func (_ *VUpval) isObj()   {}
+
+func (v VUpval) String() string {
+	if v.val == nil {
+		return "upvalue(nil)"
+	}
+	return fmt.Sprintf("upvalue(%s)", *v.val)
+}
 
 // VClos is a Lox closure.
 type VClos struct {
@@ -80,7 +95,7 @@ func (v VClos) String() string { return v.fun.String() }
 
 type (
 	VNativeFun NativeFun
-	NativeFun  = func(args ...Value) (res Value, ok bool)
+	NativeFun  = func(args ...Value) (res Value, err error)
 )
 
 func NewVNativeFun(fun NativeFun) *VNativeFun { return utils.Ref(VNativeFun(fun)) }

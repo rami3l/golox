@@ -15,7 +15,7 @@ func init() { logrus.SetLevel(logrus.DebugLevel) }
 type TestPair struct{ input, output string }
 
 func assertEval(t *testing.T, errSubstr string, pairs ...TestPair) {
-	t.Helper()
+	t.Parallel()
 	vm_ := vm.NewVM()
 	for _, pair := range pairs {
 		val, err := vm_.Interpret(pair.input+"\n", true)
@@ -29,10 +29,10 @@ func assertEval(t *testing.T, errSubstr string, pairs ...TestPair) {
 		valStr := fmt.Sprintf("%s", val)
 		assert.Equal(t, pair.output, valStr)
 	}
+	assert.Empty(t, errSubstr, "a successful test must have an empty errSubStr")
 }
 
 func TestCalculator(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"2 +2", "4"},
 		{"11.4 + 5.14 / 19198.10", "11.400267734827926"},
@@ -60,7 +60,6 @@ func TestCalculator(t *testing.T) {
 }
 
 func TestVarsBlocks(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var foo = 2;", "nil"},
 		{"foo", "2"},
@@ -70,16 +69,12 @@ func TestVarsBlocks(t *testing.T) {
 		{"bar = foo = 2;", "nil"},
 		{"foo", "2"},
 		{"bar", "2"},
-		{
-			"{ foo = foo + 1; var bar; var foo1 = foo; foo1 = foo1 + 1; }",
-			"nil",
-		},
+		{"{ foo = foo + 1; var bar; var foo1 = foo; foo1 = foo1 + 1; }", "nil"},
 		{"foo", "3"},
 	}...)
 }
 
 func TestVarOwnInit(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "can't read local variable in its own initializer",
 		[]TestPair{
 			{"var foo = 2;", "nil"},
@@ -89,7 +84,6 @@ func TestVarOwnInit(t *testing.T) {
 }
 
 func TestIfElse(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var foo = 2;", "nil"},
 		{"if (foo == 2) foo = foo + 1; else { foo = 42; }", "nil"},
@@ -104,7 +98,6 @@ func TestIfElse(t *testing.T) {
 }
 
 func TestAndOr(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{`"trick" or __TREAT__`, `"trick"`},
 		{"996 or 007", "996"},
@@ -117,7 +110,6 @@ func TestAndOr(t *testing.T) {
 }
 
 func TestIfAndOr(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var foo = 2;", "nil"},
 		{
@@ -138,7 +130,6 @@ func TestIfAndOr(t *testing.T) {
 }
 
 func TestWhile(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var i = 1; var product = 1;", "nil"},
 		{"while (i <= 5) { product = product * i; i = i + 1; }", "nil"},
@@ -147,7 +138,6 @@ func TestWhile(t *testing.T) {
 }
 
 func TestWhileJump(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var i = 1; var product = 1;", "nil"},
 		{
@@ -169,7 +159,6 @@ func TestWhileJump(t *testing.T) {
 }
 
 func TestFor(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var product = 1;", "nil"},
 		{
@@ -181,7 +170,6 @@ func TestFor(t *testing.T) {
 }
 
 func TestForBreak(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var i = 1; var product = 1;", "nil"},
 		{
@@ -194,7 +182,6 @@ func TestForBreak(t *testing.T) {
 }
 
 func TestForContinue(t *testing.T) {
-	t.Parallel()
 	assertEval(t, "", []TestPair{
 		{"var i = 1; var product = 1;", "nil"},
 		{
@@ -206,8 +193,98 @@ func TestForContinue(t *testing.T) {
 	}...)
 }
 
-func TestClosureNoEscape(t *testing.T) {
-	t.Parallel()
+func TestBareBreak(t *testing.T) {
+	assertEval(t, "expect 'break' in a loop", []TestPair{
+		{"break;", ""},
+	}...)
+}
+
+func TestBareContinue(t *testing.T) {
+	assertEval(t, "expect 'continue' in a loop", []TestPair{
+		{"continue;", ""},
+	}...)
+}
+
+func TestBareReturn(t *testing.T) {
+	assertEval(t, "can't return from top-level code", []TestPair{
+		{"return true;", ""},
+	}...)
+}
+
+func TestFunReturnInLoop(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				fun fact(n) {
+					var i; var product;
+					for (i = product = 1; ; i = i + 1) {
+						product = product * i;
+						if (i >= n) { return product; }
+					}
+				}
+			`),
+			"nil",
+		},
+		{"fact(5)", "120"},
+	}...)
+}
+
+func TestFunArity(t *testing.T) {
+	assertEval(t, "expected 2 arguments but got 1", []TestPair{
+		{"fun f(j, k) { return (1 + j) * k; }", "nil"},
+		{"f(2)", ""},
+	}...)
+}
+
+func TestFunRecursive(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"fun fact(i) { if (i <= 0) { return 1; } return i * fact(i - 1); }", "nil"},
+		{"fact(5)", "120"},
+	}...)
+}
+
+func TestFunRefGlobal(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"var a = 3; fun f() { return a; } a = 4;", "nil"},
+		{"f()", "4"},
+	}...)
+}
+
+func TestFunLateInit(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"fun f() { return a; } var a = 4;", "nil"},
+		{"f()", "4"},
+	}...)
+}
+
+func TestFunLateInitFun(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"fun f() { return four(); } fun four() { return 4; }", "nil"},
+		{"f()", "4"},
+	}...)
+}
+
+func TestBareBreakInClos(t *testing.T) {
+	assertEval(t, "expect 'break' in a loop", []TestPair{
+		{"for (var i = 0; i < 10; i = i + 1) { fun g() { break; } }", ""},
+	}...)
+}
+
+func TestBareContinueInClos(t *testing.T) {
+	assertEval(t, "expect 'continue' in a loop", []TestPair{
+		{"for (var i = 0; i < 10; i = i + 1) { fun g() { continue; } }", ""},
+	}...)
+}
+
+func TestBareReturnInClos(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"var i;", "nil"},
+		{"for (i = 0; i < 10; i = i + 1) { fun g() { return; } }", "nil"},
+		{"i", "10"},
+	}...)
+}
+
+func TestClosNoEscape(t *testing.T) {
 	assertEval(t, "", []TestPair{
 		{
 			heredoc.Doc(`
@@ -220,5 +297,155 @@ func TestClosureNoEscape(t *testing.T) {
 			"nil",
 		},
 		{"outer()", `"outside"`},
+	}...)
+}
+
+func TestClosEscape(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				fun outer() {
+					var x = "outside";
+					fun inner() { return x;} 
+					return inner;
+  				}
+			`),
+			"nil",
+		},
+		{"outer()()", `"outside"`},
+	}...)
+}
+
+func TestClosCurrying(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				fun f(j) { 
+					fun g(k) { return (1 + j) * k; }
+					return g;
+				}
+			`),
+			"nil",
+		},
+		{"f(2)(3)", "9"},
+	}...)
+}
+
+func TestClosRecursive(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"var res;", "nil"},
+		{
+			heredoc.Doc(`
+				{
+					fun fact(i) { if (i <= 0) { return 1; } return i * fact(i - 1); }
+					res = fact(5);
+				}
+			`),
+			"nil",
+		},
+		{"res", "120"},
+	}...)
+}
+
+func TestClosCounter(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				fun make_counter() {
+					var i = 0;
+					fun count() { i = i + 1; return i; }
+					return count;
+				}
+				var counter = make_counter();
+			`),
+			"nil",
+		},
+		{"counter()", "1"},
+		{"counter()", "2"},
+	}...)
+}
+
+func TestClosShareRef(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				var globalSet; var globalGet;
+				fun main() {
+					var a = "initial";
+					fun set() { a = "updated"; }
+					fun get() { return a; }
+					globalSet = set; globalGet = get;
+				}
+				main();
+				globalSet();
+			`),
+			"nil",
+		},
+		{"globalGet()", `"updated"`},
+	}...)
+}
+
+func TestClosParamShadow(t *testing.T) {
+	assertEval(t, "already a variable with this name in this scope", []TestPair{
+		{
+			heredoc.Doc(`
+				var g = "global";
+				fun scope(l) {
+					var l = "local";
+					return l;
+				}
+				var l = scope(g);
+			`),
+			"",
+		},
+	}...)
+}
+
+func TestClosVarShadow(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				var a = "global";
+				var a1; var a2;
+				{
+					fun get_a() { return a; }
+					a1 = get_a();
+					var a = "block";
+					a2 = get_a();
+				}
+			`),
+			"nil",
+		},
+		{"a1", `"global"`},
+		{"a2", `"global"`},
+	}...)
+}
+
+// http://www.rosettacode.org/wiki/Man_or_boy_test#Lox
+var manOrBoy = heredoc.Doc(`
+	fun A(k, xa, xb, xc, xd, xe) {
+		fun B() {
+			k = k - 1;
+			return A(k, B, xa, xb, xc, xd);
+		}
+		if (k <= 0) { return xd() + xe(); }
+		return B();
+	}
+	fun I0()  { return  0; }
+	fun I1()  { return  1; }
+	fun I_1() { return -1; }
+`)
+
+func TestClosManOrBoy4(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{manOrBoy, "nil"},
+		{"A(4, I1, I_1, I_1, I1, I0)", "1"},
+	}...)
+}
+
+func TestClosManOrBoy10(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{manOrBoy, "nil"},
+		{"A(10, I1, I_1, I_1, I1, I0)", "-67"},
 	}...)
 }

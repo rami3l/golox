@@ -19,9 +19,6 @@ type Parser struct {
 	*Compiler
 	prev, curr Token
 
-	loopStart    *int
-	loopEndHoles []int
-
 	errors *multierror.Error
 	// Whether the parser is trying to sync, i.e. in the error recovery process.
 	panicMode bool
@@ -31,17 +28,20 @@ func NewParser() *Parser { return &Parser{} }
 
 type (
 	Compiler struct {
-		enclosing *Compiler
-		fun       *VFun
-		funType   FunType
-		locals    []Local
-		upvals    []Upval
-		depth     int
+		enclosing    *Compiler
+		fun          *VFun
+		funType      FunType
+		locals       []Local
+		upvals       []Upval
+		depth        int
+		loopStart    *int
+		loopEndHoles []int
 	}
 
 	Local struct {
-		name  Token
-		depth int
+		name       Token
+		depth      int
+		isCaptured bool
 	}
 	Upval struct {
 		isLocal bool // Whether the upval is captured from local or from an existing upval in the outer function.
@@ -62,7 +62,7 @@ func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
 		enclosing: enclosing,
 		fun:       NewVFun(),
 		funType:   funType,
-		// Reserve the locals slot 0 to indicate the function being called.
+		// Reserve the locals slot 0 for "this".
 		locals: []Local{{}},
 	}
 }
@@ -83,7 +83,7 @@ func (c *Compiler) addLocal(name Token) (idx int) {
 	if len(c.locals) >= math.MaxUint8+1 {
 		logrus.Panicln("too many variables in function")
 	}
-	c.locals = append(c.locals, Local{name, Uninit})
+	c.locals = append(c.locals, Local{name: name, depth: Uninit})
 	return len(c.locals) - 1
 }
 
@@ -471,14 +471,11 @@ func (p *Parser) fun_() {
 
 func (p *Parser) funDecl() {
 	global := p.parseVar("expect function name")
-	validName := p.checkPrev(TIdent)
-	p.fun_()
-
-	// Global functions are immediately initialized and defined.
-	if validName {
+	if validName := p.checkPrev(TIdent); validName {
 		p.markInit()
-		p.defVar(global)
+		defer p.defVar(global)
 	}
+	p.fun_()
 }
 
 func (p *Parser) varDecl() {
@@ -724,14 +721,22 @@ func (p *Parser) endLoop() {
 	return
 }
 
-func (p *Parser) isInLoop() bool { return p.loopStart != nil }
-func (p *Parser) beginScope()    { p.depth++ }
+func (c *Compiler) isInLoop() bool { return c.loopStart != nil }
+func (p *Parser) beginScope()      { p.depth++ }
 
 func (p *Parser) endScope() {
 	p.depth--
-	for len(p.locals) > 0 && p.locals[len(p.locals)-1].depth > p.depth {
-		p.emitBytes(byte(OpPop)) // Pop off the local on the stack.
-		p.locals = p.locals[0 : len(p.locals)-1]
+	for len(p.locals) > 0 {
+		last := p.locals[len(p.locals)-1]
+		switch {
+		case last.depth <= p.depth:
+			return // Shouldn't pop off any value with a depth lower than p.depth.
+		case last.isCaptured:
+			p.emitBytes(byte(OpCloseUpval)) // Hoist the local to a VUpval.
+		default:
+			p.emitBytes(byte(OpPop)) // Pop off the local on the stack.
+		}
+		p.locals = p.locals[:len(p.locals)-1]
 	}
 }
 
@@ -760,6 +765,7 @@ func (c *Compiler) resolveUpval(name Token) (slot int) {
 		return // No outer function to capture from.
 	}
 	if local, ok := c.enclosing.resolveLocal(name); ok && local != Uninit {
+		c.enclosing.locals[local].isCaptured = true
 		return c.addUpval(Upval{isLocal: true, idx: local}) // Variable captured from local.
 	}
 	if upval := c.enclosing.resolveUpval(name); upval != Uninit {

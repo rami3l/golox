@@ -13,17 +13,21 @@ import (
 )
 
 type VM struct {
-	stack   []Value
-	frames  []CallFrame // The call stack.
+	stack []Value
+	// The call stack.
+	frames  []CallFrame
 	globals map[VStr]Value
+
+	// The head pointer of an intrusive linked list of open VUpvals, required for escape analysis.
+	openUpvals *VUpval
 }
 
 func NewVM() *VM {
 	// * Note: This deviates from the original implementation because no manual GC is required.
 	return &VM{globals: map[VStr]Value{
 		// Native functions.
-		*NewVStr("clock"): NewVNativeFun(func(_ ...Value) (Value, bool) {
-			return VNum(time.Now().UnixMicro()) * 1e-6, true
+		*NewVStr("clock"): NewVNativeFun(func(_ ...Value) (Value, error) {
+			return VNum(time.Now().UnixMicro()) * 1e-6, nil
 		}),
 	}}
 }
@@ -35,13 +39,17 @@ func (vm *VM) frame() *CallFrame {
 	return &vm.frames[len(vm.frames)-1]
 }
 
-func (vm *VM) slotAt(idx int) *Value {
+func (vm *VM) slotIdxAt(idx int) (stackIdx int) {
 	frame := vm.frame()
 	if frame == nil {
-		return nil
+		return Uninit
 	}
-	idx1 := frame.base + idx
-	if idx1 >= len(vm.stack) {
+	return frame.base + idx
+}
+
+func (vm *VM) slotAt(idx int) *Value {
+	idx1 := vm.slotIdxAt(idx)
+	if idx1 == Uninit || idx1 >= len(vm.stack) {
 		return nil
 	}
 	return &vm.stack[idx1]
@@ -167,6 +175,8 @@ func (vm *VM) run() (Value, error) {
 		case OpReturn:
 			res := vm.pop()
 			frame := vm.frames[len(vm.frames)-1]
+			// Close every remaining open upval owned by the returning function.
+			vm.closeUpvals(frame.base)
 			if vm.frames = vm.frames[:len(vm.frames)-1]; len(vm.frames) == 0 {
 				// Special case for the top-most function.
 				switch len := len(vm.stack); len {
@@ -222,10 +232,12 @@ func (vm *VM) run() (Value, error) {
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetUpval:
 			slot := int(readByte())
-			vm.push(vm.frame().clos.upvals[slot].Value)
+			vm.push(*vm.frame().clos.upvals[slot].val)
 		case OpSetUpval:
 			slot := int(readByte())
-			vm.frame().clos.upvals[slot].Value = vm.peek(0)
+			upval := vm.frame().clos.upvals[slot]
+			upval.val = utils.Ref(vm.peek(0))
+			upval.idx = utils.Ref(len(vm.stack) - 1)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpEqual:
 			rhs := vm.pop()
@@ -296,8 +308,8 @@ func (vm *VM) run() (Value, error) {
 		case OpCall:
 			argCount := int(readByte())
 			fun := vm.peek(argCount)
-			if ok := vm.call(fun, argCount); !ok {
-				return VNil{}, vm.MkError("can only call functions and classes")
+			if err := vm.call(fun, argCount); err != nil {
+				return VNil{}, err
 			}
 		case OpClos:
 			fun := readConst().(*VFun)
@@ -308,11 +320,14 @@ func (vm *VM) run() (Value, error) {
 				isLocal := utils.IntToBool(readByte())
 				idx := int(readByte())
 				if isLocal {
-					upvals[i] = vm.captureUpval(*vm.slotAt(idx))
+					upvals[i] = vm.captureUpval(vm.slotIdxAt(idx))
 				} else {
 					upvals[i] = vm.frame().clos.upvals[idx]
 				}
 			}
+		case OpCloseUpval:
+			vm.closeUpvals(len(vm.stack) - 1) // Hoist the upval.
+			vm.pop()                          // Pop the hoisted upval off the stack.
 		default:
 			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk().lines[oldIP],
@@ -322,35 +337,66 @@ func (vm *VM) run() (Value, error) {
 	}
 }
 
-func (vm *VM) call(callee Value, argCount int) (ok bool) {
+func (vm *VM) call(callee Value, argCount int) error {
 	switch callee := callee.(type) {
 	case *VClos:
 		return vm.callClos(callee, argCount)
 	case *VNativeFun:
 		base := len(vm.stack) - argCount - 1
-		res, ok := (*callee)(vm.stack[base:]...)
+		res, err := (*callee)(vm.stack[base:]...)
+		if err != nil {
+			return err
+		}
 		// Chop off the frame slots and the function slot from the current stack.
 		vm.stack = vm.stack[:base]
 		vm.push(res)
-		return ok
+		return nil
 	default:
-		return false
+		return vm.MkError("can only call functions and classes")
 	}
 }
 
-func (vm *VM) callClos(clos *VClos, argCount int) (ok bool) {
+func (vm *VM) callClos(clos *VClos, argCount int) error {
 	base := len(vm.stack) - argCount - 1
 	if argCount != clos.fun.arity {
-		vm.MkErrorf("expected %d arguments but got %d",
+		return vm.MkErrorf("expected %d arguments but got %d",
 			clos.fun.arity, argCount)
-		return false
 	}
 	// * NOTE: We could also add a stack overflow check here.
 	vm.frames = append(vm.frames, CallFrame{clos: clos, base: base})
-	return true
+	return nil
 }
 
-func (vm *VM) captureUpval(val Value) *VUpval { return NewVUpval(val) }
+func (vm *VM) closeUpvals(minStackIdx int) {
+	for curr := &vm.openUpvals; *curr != nil && *(*curr).idx >= minStackIdx; *curr = (*curr).next {
+		// Thanks to Go's garbage collection, there's no need to actually save the VUpval to a "closed" field.
+		// Here, we set idx to nil to indicate that the Upval is closed.
+		(*curr).idx = nil
+	}
+}
+
+func (vm *VM) captureUpval(stackIdx int) (res *VUpval) {
+	prev, curr := (*VUpval)(nil), vm.openUpvals
+	for curr != nil && *curr.idx > stackIdx {
+		prev, curr = curr, curr.next
+	}
+	if curr != nil && *curr.idx == stackIdx {
+		// An existing VUpval can be reused.
+		return curr
+	}
+
+	res = NewVUpval(&vm.stack[stackIdx], stackIdx)
+	res.next = curr
+	if prev == nil {
+		// The iteration didn't start: vm.openUpVals had too low idx or was empty.
+		// Insert res to the beginning of the vm.openUpvals linked list.
+		vm.openUpvals = res
+	} else {
+		// res needs to be inserted between prev and curr.
+		prev.next = res
+	}
+	return
+}
 
 func (vm *VM) MkError(reason string) *e.RuntimeError {
 	err := &e.RuntimeError{Reason: reason}
