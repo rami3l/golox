@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/josharian/intern"
 	"github.com/rami3l/golox/debug"
 	e "github.com/rami3l/golox/errors"
 	"github.com/rami3l/golox/utils"
@@ -71,8 +70,7 @@ func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
 func (p *Parser) wrapCompiler(funType FunType) {
 	res := NewCompiler(p.Compiler, funType)
 	if funType != FScript {
-		funName := intern.String(p.prev.String())
-		res.fun.name = &funName
+		res.fun.name = NewVStr(p.prev.String())
 	}
 	p.Compiler = res
 }
@@ -493,8 +491,22 @@ func (p *Parser) varDecl() {
 	}
 }
 
+func (p *Parser) classDecl() {
+	name := p.consume(TIdent, "expect class name")
+	nameConst := p.identConst(name)
+	p.declVar()
+
+	p.emitBytes(byte(OpClass), nameConst)
+	p.defVar(&nameConst)
+
+	p.consume(TLBrace, "expect '{' before class body")
+	p.consume(TRBrace, "expect '}' after class body")
+}
+
 func (p *Parser) decl() {
 	switch {
+	case p.match(TClass):
+		p.classDecl()
 	case p.match(TFun):
 		p.funDecl()
 	case p.match(TVar):

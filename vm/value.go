@@ -41,7 +41,7 @@ func (_ *VStr) isObj()        {}
 func (v VStr) String() string { return fmt.Sprintf(`"%s"`, v.Inner()) }
 
 type VFun struct {
-	name       *string
+	name       *VStr
 	arity      int
 	upvalCount int
 	chunk      *Chunk
@@ -53,7 +53,7 @@ func (v *VFun) Name() string {
 	if v.name == nil {
 		return "?"
 	}
-	return *v.name
+	return v.name.Inner()
 }
 
 func (_ *VFun) isValue()      {}
@@ -102,7 +102,15 @@ func NewVNativeFun(fun NativeFun) *VNativeFun { return utils.Ref(VNativeFun(fun)
 
 func (_ *VNativeFun) isValue()      {}
 func (_ *VNativeFun) isObj()        {}
-func (v VNativeFun) String() string { return fmt.Sprintf("<native fun>") }
+func (v VNativeFun) String() string { return "<native fun>" }
+
+type VClass struct{ name *VStr }
+
+func NewVClass(name *VStr) *VClass { return &VClass{name: name} }
+
+func (_ *VClass) isValue()      {}
+func (_ *VClass) isObj()        {}
+func (v VClass) String() string { return fmt.Sprintf("<class %s>", v.name.Inner()) }
 
 /* Value operations */
 

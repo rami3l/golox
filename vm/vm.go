@@ -328,6 +328,8 @@ func (vm *VM) run() (Value, error) {
 		case OpCloseUpval:
 			vm.closeUpvals(len(vm.stack) - 1) // Hoist the upval.
 			vm.pop()                          // Pop the hoisted upval off the stack.
+		case OpClass:
+			vm.push(NewVClass(readConst().(*VStr)))
 		default:
 			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk().lines[oldIP],
