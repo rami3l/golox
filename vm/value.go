@@ -83,15 +83,15 @@ func (v VUpval) String() string {
 
 // VClos is a Lox closure.
 type VClos struct {
-	fun    *VFun
+	*VFun
 	upvals []*VUpval // A list of borrowed VUpval.
 }
 
-func NewVClos(fun *VFun) *VClos { return &VClos{fun: fun, upvals: make([]*VUpval, fun.upvalCount)} }
+func NewVClos(fun *VFun) *VClos { return &VClos{VFun: fun, upvals: make([]*VUpval, fun.upvalCount)} }
 
 func (_ *VClos) isValue()      {}
 func (_ *VClos) isObj()        {}
-func (v VClos) String() string { return v.fun.String() }
+func (v VClos) String() string { return v.VFun.String() }
 
 type (
 	VNativeFun NativeFun
@@ -104,26 +104,36 @@ func (_ *VNativeFun) isValue()      {}
 func (_ *VNativeFun) isObj()        {}
 func (v VNativeFun) String() string { return "<native fun>" }
 
-type VClass struct{ name *VStr }
+type VClass struct {
+	name    *VStr
+	methods map[VStr]Value
+}
 
-func NewVClass(name *VStr) *VClass { return &VClass{name: name} }
+func NewVClass(name *VStr) *VClass { return &VClass{name: name, methods: map[VStr]Value{}} }
 
 func (_ *VClass) isValue()      {}
 func (_ *VClass) isObj()        {}
 func (v VClass) String() string { return fmt.Sprintf("<class %s>", v.name.Inner()) }
 
 type VInstance struct {
-	class  *VClass
+	*VClass
 	fields map[VStr]Value
 }
 
 func NewVInstance(class *VClass) *VInstance {
-	return &VInstance{class: class, fields: map[VStr]Value{}}
+	return &VInstance{VClass: class, fields: map[VStr]Value{}}
 }
 
-func (_ *VInstance) isValue()      {}
-func (_ *VInstance) isObj()        {}
-func (v VInstance) String() string { return fmt.Sprintf("<instanceof %s>", v.class.name.Inner()) }
+func (v VInstance) String() string { return fmt.Sprintf("<instanceof %s>", v.VClass.name.Inner()) }
+
+type VBoundMethod struct {
+	*VClos
+	this Value
+}
+
+func NewVBoundMethod(this Value, clos *VClos) *VBoundMethod {
+	return &VBoundMethod{VClos: clos, this: this}
+}
 
 /* Value operations */
 

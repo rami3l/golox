@@ -144,6 +144,10 @@ func (p *Parser) str(_canAssign bool) {
 
 func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
 
+// namedVar tries to compile the given identifier.
+//
+// It emits the corresponding OpGet (or OpSet, if the canAssign flag is set and an assignment is detected)
+// instruction depending on how the underlying variable is resolved.
 func (p *Parser) namedVar(name Token, canAssign bool) {
 	slot := p.resolveLocal(name)
 	if slot > math.MaxUint8 {
@@ -448,8 +452,8 @@ func (p *Parser) stmt() {
 	}
 }
 
-func (p *Parser) fun_() {
-	p.wrapCompiler(FFun)
+func (p *Parser) fun_(ty FunType) {
+	p.wrapCompiler(ty)
 	p.beginScope()
 
 	p.consume(TLParen, "expect '(' after function name")
@@ -485,7 +489,7 @@ func (p *Parser) funDecl() {
 		p.markInit()
 		defer p.defVar(global)
 	}
-	p.fun_()
+	p.fun_(FFun)
 }
 
 func (p *Parser) varDecl() {
@@ -511,8 +515,19 @@ func (p *Parser) classDecl() {
 	p.emitBytes(byte(OpClass), nameConst)
 	p.defVar(&nameConst)
 
+	p.namedVar(*name, false) // Push the class onto the stack for further modifications.
 	p.consume(TLBrace, "expect '{' before class body")
+	for !p.check(TRBrace) && !p.check(TEOF) {
+		p.method()
+	}
 	p.consume(TRBrace, "expect '}' after class body")
+	p.emitBytes(byte(OpPop)) // Pop off the class.
+}
+
+func (p *Parser) method() {
+	name := p.consume(TIdent, "expect method name")
+	p.fun_(FFun)
+	p.emitBytes(byte(OpMethod), p.identConst(name))
 }
 
 func (p *Parser) decl() {
@@ -622,13 +637,15 @@ func (p *Parser) match(ty TokenType) (matched bool) {
 	return true
 }
 
+// consumes and returns the current token if it is of the given type, or nil otherwise.
 func (p *Parser) consume(ty TokenType, errorMsg string) *Token {
 	if !p.check(ty) {
 		p.ErrorAtCurr(errorMsg)
 		return nil
 	}
+	res := p.curr
 	p.advance()
-	return &p.prev
+	return &res
 }
 
 /* Compiling helpers */

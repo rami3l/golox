@@ -66,7 +66,7 @@ func (vm *VM) chunk() *Chunk {
 	if frame == nil || frame.clos == nil {
 		return nil
 	}
-	return vm.frame().clos.fun.chunk
+	return vm.frame().clos.chunk
 }
 
 func (vm *VM) ip() *int {
@@ -263,9 +263,14 @@ func (vm *VM) run() (Value, error) {
 			name := *readStr()
 			res, ok := instance.fields[name]
 			if !ok {
-				return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
+				// Fall back to method resolution.
+				method, ok := instance.methods[name]
+				if !ok {
+					return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
+				}
+				res = NewVBoundMethod(vm.peek(0), method.(*VClos))
 			}
-			vm.stack[len(vm.stack)-1] = res // Replace the instance with the field.
+			vm.stack[len(vm.stack)-1] = res // Replace the instance with the result.
 		case OpSetProp:
 			instance, ok := vm.peek(1).(*VInstance)
 			if !ok {
@@ -366,6 +371,11 @@ func (vm *VM) run() (Value, error) {
 			vm.pop()                          // Pop the hoisted upval off the stack.
 		case OpClass:
 			vm.push(NewVClass(readStr()))
+		case OpMethod:
+			name := *readStr()
+			method := vm.pop()
+			class := vm.peek(0).(*VClass)
+			class.methods[name] = method
 		default:
 			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk().lines[oldIP],
@@ -380,6 +390,8 @@ func (vm *VM) call(callee Value, argCount int) error {
 	switch callee := callee.(type) {
 	case *VClass:
 		vm.stack[base] = NewVInstance(callee)
+	case *VBoundMethod:
+		return vm.callClos(callee.VClos, argCount)
 	case *VClos:
 		return vm.callClos(callee, argCount)
 	case *VNativeFun:
@@ -397,9 +409,9 @@ func (vm *VM) call(callee Value, argCount int) error {
 
 func (vm *VM) callClos(clos *VClos, argCount int) error {
 	base := len(vm.stack) - argCount - 1
-	if argCount != clos.fun.arity {
+	if argCount != clos.arity {
 		return vm.MkErrorf("expected %d arguments but got %d",
-			clos.fun.arity, argCount)
+			clos.arity, argCount)
 	}
 	// * NOTE: We could also add a stack overflow check here.
 	vm.frames = append(vm.frames, CallFrame{clos: clos, base: base})
@@ -470,8 +482,8 @@ func (vm *VM) callTrace() (res string) {
 			"\n          [L%d] in %s()",
 			// The - 1 is because the IP is already sitting on the next instruction to be executed,
 			// but we want the stack trace to point to the previous failed instruction.
-			clos.fun.chunk.lines[frame.ip-1],
-			clos.fun.Name(),
+			clos.chunk.lines[frame.ip-1],
+			clos.Name(),
 		)
 	}
 	return

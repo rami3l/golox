@@ -478,3 +478,20 @@ func TestClassGetUndefined(t *testing.T) {
 		{"Foo().bar", ""},
 	}...)
 }
+
+func TestClassMethodNotBound(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class Scone {
+					topping(first, second) {
+						return "scone with " + first + " and " + second;
+					}
+				}
+			`),
+			"nil",
+		},
+		{"var scone = Scone();", "nil"},
+		{`scone.topping("berries", "cream")`, `"scone with berries and cream"`},
+	}...)
+}

@@ -42,6 +42,7 @@ const (
 	OpClos
 	OpCloseUpval
 	OpClass
+	OpMethod
 )
 
 type Chunk struct {
@@ -103,7 +104,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 			offset+3+jump)
 		return res, offset + 3
 	// Unary operators.
-	case OpConst, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpGetProp, OpSetProp, OpClass: // `constantInstruction`
+	case OpConst, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpGetProp, OpSetProp, OpClass, OpMethod: // `constantInstruction`
 		const_ := c.code[offset+1]
 		appendf("%-16s %4d '%s'", inst, const_, c.consts[const_])
 		return res, offset + 2
