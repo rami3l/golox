@@ -10,6 +10,7 @@
     "falsey",
     "golox",
     "hashicorp",
+    "instanceof",
     "Nullary",
     "stretchr",
     "upval",

@@ -10,6 +10,7 @@ import (
 	e "github.com/rami3l/golox/errors"
 	"github.com/rami3l/golox/utils"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 )
 
 type VM struct {
@@ -162,6 +163,8 @@ func (vm *VM) run() (Value, error) {
 		return
 	}
 
+	readStr := func() *VStr { return readConst().(*VStr) }
+
 	for {
 		if debug.DEBUG {
 			logrus.Debugln(vm.stackTrace())
@@ -191,10 +194,9 @@ func (vm *VM) run() (Value, error) {
 					return VNil{}, vm.MkErrorf("unexpected number of values in the stack: '%v'", vm.stack)
 				}
 			}
-			// Chop off the frame slots from the current stack.
-			vm.stack = vm.stack[:frame.base]
-			// Put the return value back to the stack top.
-			vm.push(res)
+			// Chop off the frame slots from the current stack,
+			// and put the return value back to the stack top.
+			vm.stack = append(vm.stack[:frame.base], res)
 		case OpConst:
 			vm.push(readConst())
 		case OpNil:
@@ -213,18 +215,17 @@ func (vm *VM) run() (Value, error) {
 			*vm.slotAt(slot) = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetGlobal:
-			name := *readConst().(*VStr)
+			name := *readStr()
 			val, ok := vm.globals[name]
 			if !ok {
 				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
 			vm.push(val)
 		case OpDefGlobal:
-			name := *readConst().(*VStr)
-			vm.globals[name] = vm.peek(0)
-			vm.pop()
+			name := *readStr()
+			vm.globals[name] = vm.pop()
 		case OpSetGlobal:
-			name := *readConst().(*VStr)
+			name := *readStr()
 			if _, ok := vm.globals[name]; !ok {
 				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
 			}
@@ -239,6 +240,26 @@ func (vm *VM) run() (Value, error) {
 			upval.val = utils.Ref(vm.peek(0))
 			upval.idx = utils.Ref(len(vm.stack) - 1)
 			// Don't pop, since the set operation has the RHS as its return value.
+		case OpGetProp:
+			instance, ok := vm.peek(0).(*VInstance)
+			if !ok {
+				return VNil{}, vm.MkError("only instances have properties")
+			}
+			name := *readStr()
+			res, ok := instance.fields[name]
+			if !ok {
+				return VNil{}, vm.MkErrorf("undefined property '%v'", name)
+			}
+			vm.stack[len(vm.stack)-1] = res // Replace the instance with the field.
+		case OpSetProp:
+			instance, ok := vm.peek(1).(*VInstance)
+			if !ok {
+				return VNil{}, vm.MkError("only instances have fields")
+			}
+			name := *readStr()
+			instance.fields[name] = vm.peek(0) // The RHS.
+			// Pop off the instance, keep the RHS as its return value.
+			vm.stack = slices.Delete(vm.stack, len(vm.stack)-2, len(vm.stack)-1)
 		case OpEqual:
 			rhs := vm.pop()
 			vm.push(VEq(vm.pop(), rhs))
@@ -329,7 +350,7 @@ func (vm *VM) run() (Value, error) {
 			vm.closeUpvals(len(vm.stack) - 1) // Hoist the upval.
 			vm.pop()                          // Pop the hoisted upval off the stack.
 		case OpClass:
-			vm.push(NewVClass(readConst().(*VStr)))
+			vm.push(NewVClass(readStr()))
 		default:
 			return VNil{}, &e.RuntimeError{
 				Line:   vm.chunk().lines[oldIP],
@@ -340,11 +361,13 @@ func (vm *VM) run() (Value, error) {
 }
 
 func (vm *VM) call(callee Value, argCount int) error {
+	base := len(vm.stack) - argCount - 1
 	switch callee := callee.(type) {
+	case *VClass:
+		vm.stack[base] = NewVInstance(callee)
 	case *VClos:
 		return vm.callClos(callee, argCount)
 	case *VNativeFun:
-		base := len(vm.stack) - argCount - 1
 		res, err := (*callee)(vm.stack[base:]...)
 		if err != nil {
 			return err
@@ -352,10 +375,10 @@ func (vm *VM) call(callee Value, argCount int) error {
 		// Chop off the frame slots and the function slot from the current stack.
 		vm.stack = vm.stack[:base]
 		vm.push(res)
-		return nil
 	default:
 		return vm.MkError("can only call functions and classes")
 	}
+	return nil
 }
 
 func (vm *VM) callClos(clos *VClos, argCount int) error {

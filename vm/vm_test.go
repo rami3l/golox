@@ -449,3 +449,24 @@ func TestClosManOrBoy10(t *testing.T) {
 		{"A(10, I1, I_1, I_1, I1, I0)", "-67"},
 	}...)
 }
+
+func TestClassEmpty(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"class Foo {}", "nil"},
+		{"Foo", "<class Foo>"},
+	}...)
+}
+
+func TestClassGetSet(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"class Foo {}", "nil"},
+		{"var foo = Foo();", "nil"},
+		{"foo", "<instanceof Foo>"},
+		{"foo.bar = 10086", "10086"},
+		{"foo.bar", "10086"},
+		{`foo.bar = "foobar"`, `"foobar"`},
+		{`foo.bar`, `"foobar"`},
+		{`foo.baz = foo.bar + "baz"`, `"foobarbaz"`},
+		{`foo.baz`, `"foobarbaz"`},
+	}...)
+}

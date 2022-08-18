@@ -112,6 +112,19 @@ func (_ *VClass) isValue()      {}
 func (_ *VClass) isObj()        {}
 func (v VClass) String() string { return fmt.Sprintf("<class %s>", v.name.Inner()) }
 
+type VInstance struct {
+	class  *VClass
+	fields map[VStr]Value
+}
+
+func NewVInstance(class *VClass) *VInstance {
+	return &VInstance{class: class, fields: map[VStr]Value{}}
+}
+
+func (_ *VInstance) isValue()      {}
+func (_ *VInstance) isObj()        {}
+func (v VInstance) String() string { return fmt.Sprintf("<instanceof %s>", v.class.name.Inner()) }
+
 /* Value operations */
 
 func VAdd(v, w Value) (res Value, ok bool) {

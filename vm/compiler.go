@@ -270,6 +270,18 @@ func (p *Parser) argList() (argCount int) {
 	return
 }
 
+func (p *Parser) dot(canAssign bool) {
+	name := p.consume(TIdent, "expect property name after '.'")
+	nameConst := p.identConst(name)
+
+	inst := OpGetProp
+	if canAssign && p.match(TEqual) {
+		p.expr()
+		inst = OpSetProp
+	}
+	p.emitBytes(byte(inst), nameConst)
+}
+
 func (p *Parser) expr() { p.parsePrec(PrecAssign) }
 
 func (p *Parser) exprStmt() {
@@ -531,6 +543,7 @@ var parseRules []ParseRule
 func init() {
 	parseRules = []ParseRule{
 		TLParen:       {(*Parser).grouping, (*Parser).call, PrecCall},
+		TDot:          {nil, (*Parser).dot, PrecCall},
 		TMinus:        {(*Parser).unary, (*Parser).binary, PrecTerm},
 		TPlus:         {nil, (*Parser).binary, PrecTerm},
 		TSlash:        {nil, (*Parser).binary, PrecFactor},
