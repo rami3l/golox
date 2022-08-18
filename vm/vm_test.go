@@ -15,6 +15,7 @@ func init() { logrus.SetLevel(logrus.DebugLevel) }
 type TestPair struct{ input, output string }
 
 func assertEval(t *testing.T, errSubstr string, pairs ...TestPair) {
+	t.Helper()
 	t.Parallel()
 	vm_ := vm.NewVM()
 	for _, pair := range pairs {
@@ -468,5 +469,12 @@ func TestClassGetSet(t *testing.T) {
 		{`foo.bar`, `"foobar"`},
 		{`foo.baz = foo.bar + "baz"`, `"foobarbaz"`},
 		{`foo.baz`, `"foobarbaz"`},
+	}...)
+}
+
+func TestClassGetUndefined(t *testing.T) {
+	assertEval(t, "undefined property 'bar'", []TestPair{
+		{"class Foo {}", "nil"},
+		{"Foo().bar", ""},
 	}...)
 }

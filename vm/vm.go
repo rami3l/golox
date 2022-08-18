@@ -28,9 +28,14 @@ func NewVM() *VM {
 	return &VM{globals: map[VStr]Value{
 		// Native functions.
 		*NewVStr("clock"): NewVNativeFun(func(_ ...Value) (Value, error) {
-			return VNum(time.Now().UnixMicro()) * 1e-6, nil
+			return VNum(time.Now().UnixNano()) / VNum(time.Second), nil
 		}),
 	}}
+}
+
+func (vm *VM) Recover() {
+	vm.stack = []Value{}
+	vm.frames = []CallFrame{}
 }
 
 func (vm *VM) frame() *CallFrame {
@@ -127,14 +132,24 @@ func (vm *VM) REPL() error {
 }
 
 func (vm *VM) Interpret(src string, isREPL bool) (res Value, err error) {
+	defer func() {
+		if err != nil {
+			vm.Recover()
+		}
+	}()
+
 	parser := NewParser()
 	fun, err := parser.Compile(src, isREPL)
 	clos := NewVClos(fun)
 	if err != nil {
 		return VNil{}, err
 	}
-	vm.push(clos)    // Push the current function to slack slot 0.
-	vm.call(clos, 0) // Set up the call frame for the top-level code.
+	// Push the current function to slack slot 0.
+	vm.push(clos)
+	// Set up the call frame for the top-level code.
+	if err = vm.call(clos, 0); err != nil {
+		return
+	}
 	return vm.run()
 }
 
@@ -218,7 +233,7 @@ func (vm *VM) run() (Value, error) {
 			name := *readStr()
 			val, ok := vm.globals[name]
 			if !ok {
-				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
+				return VNil{}, vm.MkErrorf("undefined variable '%s'", name.Inner())
 			}
 			vm.push(val)
 		case OpDefGlobal:
@@ -227,7 +242,7 @@ func (vm *VM) run() (Value, error) {
 		case OpSetGlobal:
 			name := *readStr()
 			if _, ok := vm.globals[name]; !ok {
-				return VNil{}, vm.MkErrorf("undefined variable '%v'", name)
+				return VNil{}, vm.MkErrorf("undefined variable '%s'", name.Inner())
 			}
 			vm.globals[name] = vm.peek(0)
 			// Don't pop, since the set operation has the RHS as its return value.
@@ -248,7 +263,7 @@ func (vm *VM) run() (Value, error) {
 			name := *readStr()
 			res, ok := instance.fields[name]
 			if !ok {
-				return VNil{}, vm.MkErrorf("undefined property '%v'", name)
+				return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
 			}
 			vm.stack[len(vm.stack)-1] = res // Replace the instance with the field.
 		case OpSetProp:
@@ -373,8 +388,7 @@ func (vm *VM) call(callee Value, argCount int) error {
 			return err
 		}
 		// Chop off the frame slots and the function slot from the current stack.
-		vm.stack = vm.stack[:base]
-		vm.push(res)
+		vm.stack = append(vm.stack[:base], res)
 	default:
 		return vm.MkError("can only call functions and classes")
 	}
