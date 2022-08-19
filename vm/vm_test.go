@@ -491,7 +491,7 @@ func TestClassSetInvalid(t *testing.T) {
 	}...)
 }
 
-func TestClassMethodNotBound(t *testing.T) {
+func TestClassMethodUnbound(t *testing.T) {
 	assertEval(t, "", []TestPair{
 		{
 			heredoc.Doc(`
@@ -551,5 +551,59 @@ func TestBareThis(t *testing.T) {
 func TestBareThisFun(t *testing.T) {
 	assertEval(t, "can't use 'this' outside of a class", []TestPair{
 		{"fun foo() { return this; }", ""},
+	}...)
+}
+
+func TestClassInit(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class CoffeeMaker {
+					init(coffee) { this.coffee = coffee; }
+					brew() {
+						var res = "Enjoy your cup of " + this.coffee;
+						// No reusing the grounds!
+						this.coffee = nil;
+						return res;
+					}
+				}
+			`),
+			"nil",
+		},
+		{`var maker = CoffeeMaker("coffee and chicory");`, "nil"},
+		{"maker.brew()", `"Enjoy your cup of coffee and chicory"`},
+	}...)
+}
+
+func TestClassInitReturn(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{"class Foo { init(name) { return; } }", "nil"},
+	}...)
+}
+
+func TestClassInitReturnVal(t *testing.T) {
+	assertEval(t, "can't return a value from an initializer", []TestPair{
+		{"class Bar { init(name) { return name; } }", ""},
+	}...)
+}
+
+func TestClassInitArity0(t *testing.T) {
+	assertEval(t, "expected 1 arguments but got 0", []TestPair{
+		{"class Bar { init(name) {} }", "nil"},
+		{"Bar()", "nil"},
+	}...)
+}
+
+func TestClassInitArityN(t *testing.T) {
+	assertEval(t, "expected 1 arguments but got 3", []TestPair{
+		{"class Bar { init(name) {} }", "nil"},
+		{"Bar(0, 1, 2)", "nil"},
+	}...)
+}
+
+func TestClassNoInitArity(t *testing.T) {
+	assertEval(t, "expected 0 arguments but got 3", []TestPair{
+		{"class Bar {}", "nil"},
+		{"Bar(0, 1, 2)", ""},
 	}...)
 }

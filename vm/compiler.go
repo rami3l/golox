@@ -56,6 +56,7 @@ type FunType int
 //go:generate stringer -type=FunType
 const (
 	FFun FunType = iota
+	FInit
 	FMethod
 	FScript
 )
@@ -431,10 +432,18 @@ func (p *Parser) continueStmt() {
 }
 
 func (p *Parser) returnStmt() {
-	if p.match(TSemi) {
+	switch {
+	case p.match(TSemi):
+		// `return;`
 		p.emitReturn()
 		return
+	case p.funType == FInit:
+		// `return val;`
+		// In `init`, this form is not allowed.
+		p.Error("can't return a value from an initializer")
+		return
 	}
+	// `return val;`
 	p.expr()
 	p.consume(TSemi, "expect ';' after return value")
 	p.emitBytes(byte(OpReturn))
@@ -554,7 +563,11 @@ func (p *Parser) classDecl() {
 
 func (p *Parser) method() {
 	name := p.consume(TIdent, "expect method name")
-	p.fun_(FMethod)
+	ty := FMethod
+	if name.Eq(Token{Type: TIdent, Runes: []rune("init")}) {
+		ty = FInit
+	}
+	p.fun_(ty)
 	p.emitBytes(byte(OpMethod), p.identConst(name))
 }
 
@@ -715,7 +728,14 @@ func (p *Parser) emitBytes(bs ...byte) {
 	}
 }
 
-func (p *Parser) emitReturn() { p.emitBytes(byte(OpNil), byte(OpReturn)) }
+func (p *Parser) emitReturn() {
+	if p.funType == FInit {
+		// `init` implicitly returns `this`.
+		p.emitBytes(byte(OpGetLocal), 0 /* this */, byte(OpReturn))
+		return
+	}
+	p.emitBytes(byte(OpNil), byte(OpReturn))
+}
 
 func (p *Parser) endCompiler() (fun *VFun, upvals []Upval) {
 	p.emitReturn()

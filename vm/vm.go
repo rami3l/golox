@@ -391,6 +391,16 @@ func (vm *VM) call(callee Value, argCount int) error {
 	case *VClass:
 		// Replace the called class with a new instance.
 		vm.stack[base] = NewVInstance(callee)
+		// Execute `init` if exists and is a closure.
+		if init, ok := callee.methods[*NewVStr("init")]; ok {
+			if init, ok := init.(*VClos); ok {
+				// The `init` closure assumes the slot 0 to be `this`, just like regular methods.
+				return vm.callClos(init, argCount)
+			}
+		} else if argCount != 0 {
+			return vm.MkErrorf("expected 0 arguments but got %d.",
+				argCount)
+		}
 	case *VBoundMethod:
 		// Replace the called method with `this`.
 		vm.stack[base] = callee.this
