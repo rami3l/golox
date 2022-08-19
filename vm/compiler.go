@@ -16,7 +16,8 @@ import (
 type Parser struct {
 	*Scanner
 	*Compiler
-	prev, curr Token
+	ClassCompiler *ClassCompiler
+	prev, curr    Token
 
 	errors *multierror.Error
 	// Whether the parser is trying to sync, i.e. in the error recovery process.
@@ -46,6 +47,8 @@ type (
 		isLocal bool // Whether the upval is captured from local or from an existing upval in the outer function.
 		idx     int  // The index at which the actual value can be found in the VM stack.
 	}
+
+	ClassCompiler struct{ enclosing *ClassCompiler }
 )
 
 type FunType int
@@ -53,17 +56,29 @@ type FunType int
 //go:generate stringer -type=FunType
 const (
 	FFun FunType = iota
+	FMethod
 	FScript
 )
 
 func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
+	this := Local{}
+	if funType != FFun {
+		this = Local{
+			name:  Token{Type: TThis, Runes: []rune("this")},
+			depth: 0,
+		}
+	}
 	return &Compiler{
 		enclosing: enclosing,
 		fun:       NewVFun(),
 		funType:   funType,
 		// Reserve the locals slot 0 for "this".
-		locals: []Local{{}},
+		locals: []Local{this},
 	}
+}
+
+func NewClassCompiler(enclosing *ClassCompiler) *ClassCompiler {
+	return &ClassCompiler{enclosing: enclosing}
 }
 
 // wrapCompiler replaces the Compiler with a new one enclosing the current one.
@@ -74,6 +89,10 @@ func (p *Parser) wrapCompiler(funType FunType) {
 	}
 	p.Compiler = res
 }
+
+func (p *Parser) unwrapCompiler()      { p.Compiler = p.Compiler.enclosing }
+func (p *Parser) wrapClassCompiler()   { p.ClassCompiler = NewClassCompiler(p.ClassCompiler) }
+func (p *Parser) unwrapClassCompiler() { p.ClassCompiler = p.ClassCompiler.enclosing }
 
 const Uninit = -1
 
@@ -142,6 +161,13 @@ func (p *Parser) str(_canAssign bool) {
 	p.emitConst(NewVStr(unquoted))
 }
 
+func (p *Parser) this(_canAssign bool) {
+	if p.ClassCompiler == nil {
+		p.Error("can't use 'this' outside of a class")
+	}
+	p.var_(false)
+}
+
 func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
 
 // namedVar tries to compile the given identifier.
@@ -169,11 +195,10 @@ func (p *Parser) namedVar(name Token, canAssign bool) {
 		arg, get, set = p.identConst(&name), OpGetGlobal, OpSetGlobal
 	}
 
-	switch {
-	case canAssign && p.match(TEqual):
+	if canAssign && p.match(TEqual) {
 		p.expr()
 		p.emitBytes(byte(set), arg)
-	default:
+	} else {
 		p.emitBytes(byte(get), arg)
 	}
 }
@@ -495,10 +520,9 @@ func (p *Parser) funDecl() {
 func (p *Parser) varDecl() {
 	global := p.parseVar("expect variable name")
 	validName := p.checkPrev(TIdent)
-	switch {
-	case p.match(TEqual):
+	if p.match(TEqual) {
 		p.expr()
-	default:
+	} else {
 		p.emitBytes(byte(OpNil))
 	}
 	p.consume(TSemi, "expect ';' after variable declaration")
@@ -515,6 +539,8 @@ func (p *Parser) classDecl() {
 	p.emitBytes(byte(OpClass), nameConst)
 	p.defVar(&nameConst)
 
+	p.wrapClassCompiler()
+
 	p.namedVar(*name, false) // Push the class onto the stack for further modifications.
 	p.consume(TLBrace, "expect '{' before class body")
 	for !p.check(TRBrace) && !p.check(TEOF) {
@@ -522,11 +548,13 @@ func (p *Parser) classDecl() {
 	}
 	p.consume(TRBrace, "expect '}' after class body")
 	p.emitBytes(byte(OpPop)) // Pop off the class.
+
+	p.unwrapClassCompiler()
 }
 
 func (p *Parser) method() {
 	name := p.consume(TIdent, "expect method name")
-	p.fun_(FFun)
+	p.fun_(FMethod)
 	p.emitBytes(byte(OpMethod), p.identConst(name))
 }
 
@@ -577,6 +605,7 @@ func init() {
 		TFalse:        {(*Parser).lit, nil, PrecNone},
 		TNil:          {(*Parser).lit, nil, PrecNone},
 		TOr:           {nil, (*Parser).or, PrecOr},
+		TThis:         {(*Parser).this, nil, PrecNone},
 		TTrue:         {(*Parser).lit, nil, PrecNone},
 		TEOF:          {},
 	}
@@ -694,7 +723,7 @@ func (p *Parser) endCompiler() (fun *VFun, upvals []Upval) {
 	if debug.DEBUG {
 		logrus.Debugln(p.currChunk().Disassemble(fun.Name()))
 	}
-	p.Compiler = p.Compiler.enclosing
+	p.unwrapCompiler()
 	return
 }
 

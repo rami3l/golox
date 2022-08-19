@@ -9,12 +9,13 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[FFun-0]
-	_ = x[FScript-1]
+	_ = x[FMethod-1]
+	_ = x[FScript-2]
 }
 
-const _FunType_name = "FFunFScript"
+const _FunType_name = "FFunFMethodFScript"
 
-var _FunType_index = [...]uint8{0, 4, 11}
+var _FunType_index = [...]uint8{0, 4, 11, 18}
 
 func (i FunType) String() string {
 	if i < 0 || i >= FunType(len(_FunType_index)-1) {

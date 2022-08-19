@@ -389,8 +389,11 @@ func (vm *VM) call(callee Value, argCount int) error {
 	base := len(vm.stack) - argCount - 1
 	switch callee := callee.(type) {
 	case *VClass:
+		// Replace the called class with a new instance.
 		vm.stack[base] = NewVInstance(callee)
 	case *VBoundMethod:
+		// Replace the called method with `this`.
+		vm.stack[base] = callee.this
 		return vm.callClos(callee.VClos, argCount)
 	case *VClos:
 		return vm.callClos(callee, argCount)

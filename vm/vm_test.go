@@ -479,6 +479,18 @@ func TestClassGetUndefined(t *testing.T) {
 	}...)
 }
 
+func TestClassGetInvalid(t *testing.T) {
+	assertEval(t, "only instances have properties", []TestPair{
+		{"true.story", ""},
+	}...)
+}
+
+func TestClassSetInvalid(t *testing.T) {
+	assertEval(t, "only instances have fields", []TestPair{
+		{"true.story = 42", ""},
+	}...)
+}
+
 func TestClassMethodNotBound(t *testing.T) {
 	assertEval(t, "", []TestPair{
 		{
@@ -493,5 +505,51 @@ func TestClassMethodNotBound(t *testing.T) {
 		},
 		{"var scone = Scone();", "nil"},
 		{`scone.topping("berries", "cream")`, `"scone with berries and cream"`},
+	}...)
+}
+
+func TestClassMethodBound(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{`class Egotist { speak() { return "Just " + this.name; } }`, "nil"},
+		{`var jimmy = Egotist(); jimmy.name = "Jimmy";`, "nil"},
+		{"jimmy.speak()", `"Just Jimmy"`},
+	}...)
+}
+
+func TestClassMethodBoundRef(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{`class Egotist { speak() { return "Just " + this.name; } }`, "nil"},
+		{`var jimmy = Egotist(); jimmy.name = "Jimmy";`, "nil"},
+		{"var s = jimmy.speak;", "nil"},
+		{"s()", `"Just Jimmy"`},
+	}...)
+}
+
+func TestClassMethodBoundNested(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class Nested {
+					method() { 
+						fun f() { return this; }
+						return f();
+					}
+				}
+			`),
+			"nil",
+		},
+		{"Nested().method()", "<instanceof Nested>"},
+	}...)
+}
+
+func TestBareThis(t *testing.T) {
+	assertEval(t, "can't use 'this' outside of a class", []TestPair{
+		{"this", ""},
+	}...)
+}
+
+func TestBareThisFun(t *testing.T) {
+	assertEval(t, "can't use 'this' outside of a class", []TestPair{
+		{"fun foo() { return this; }", ""},
 	}...)
 }
