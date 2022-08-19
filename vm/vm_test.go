@@ -607,3 +607,22 @@ func TestClassNoInitArity(t *testing.T) {
 		{"Bar(0, 1, 2)", ""},
 	}...)
 }
+
+func TestClassInvokeOptim(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class Oops {
+					init() {
+						fun f() { this.foo = "bar"; }
+						this.field = f;
+					}
+				}
+			`),
+			"nil",
+		},
+		{"var oops = Oops();", "nil"},
+		{"oops.field();", "nil"},
+		{"oops.foo", `"bar"`},
+	}...)
+}

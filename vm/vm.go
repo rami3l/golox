@@ -256,15 +256,15 @@ func (vm *VM) run() (Value, error) {
 			upval.idx = utils.Ref(len(vm.stack) - 1)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetProp:
-			instance, ok := vm.peek(0).(*VInstance)
+			this, ok := vm.peek(0).(*VInstance)
 			if !ok {
 				return VNil{}, vm.MkError("only instances have properties")
 			}
 			name := *readStr()
-			res, ok := instance.fields[name]
+			res, ok := this.fields[name]
 			if !ok {
 				// Fall back to method resolution.
-				method, ok := instance.methods[name]
+				method, ok := this.methods[name]
 				if !ok {
 					return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
 				}
@@ -272,12 +272,12 @@ func (vm *VM) run() (Value, error) {
 			}
 			vm.stack[len(vm.stack)-1] = res // Replace the instance with the result.
 		case OpSetProp:
-			instance, ok := vm.peek(1).(*VInstance)
+			this, ok := vm.peek(1).(*VInstance)
 			if !ok {
 				return VNil{}, vm.MkError("only instances have fields")
 			}
 			name := *readStr()
-			instance.fields[name] = vm.peek(0) // The RHS.
+			this.fields[name] = vm.peek(0) // The RHS.
 			// Pop off the instance, keep the RHS as its return value.
 			vm.stack = slices.Delete(vm.stack, len(vm.stack)-2, len(vm.stack)-1)
 		case OpEqual:
@@ -348,8 +348,27 @@ func (vm *VM) run() (Value, error) {
 			*vm.ip() -= int(offset)
 		case OpCall:
 			argCount := int(readByte())
-			fun := vm.peek(argCount)
-			if err := vm.call(fun, argCount); err != nil {
+			callee := vm.peek(argCount)
+			if err := vm.call(callee, argCount); err != nil {
+				return VNil{}, err
+			}
+		case OpInvoke:
+			name := *readStr()
+			argCount := int(readByte())
+			this, ok := vm.peek(argCount).(*VInstance)
+			if !ok {
+				return VNil{}, vm.MkError("only instances have methods")
+			}
+			// What if `method` in `this.method()` is not a method but a regular closure?
+			if field, ok := this.fields[name]; ok {
+				base := len(vm.stack) - argCount - 1
+				vm.stack[base] = field
+				if err := vm.call(field, argCount); err != nil {
+					return VNil{}, err
+				}
+				break
+			}
+			if err := vm.invokeFromClass(this.VClass, name, argCount); err != nil {
 				return VNil{}, err
 			}
 		case OpClos:
@@ -429,6 +448,14 @@ func (vm *VM) callClos(clos *VClos, argCount int) error {
 	// * NOTE: We could also add a stack overflow check here.
 	vm.frames = append(vm.frames, CallFrame{clos: clos, base: base})
 	return nil
+}
+
+func (vm *VM) invokeFromClass(class *VClass, methodName VStr, argCount int) error {
+	method, ok := class.methods[methodName]
+	if !ok {
+		return vm.MkErrorf("undefined property '%s'", methodName.Inner())
+	}
+	return vm.call(method, argCount)
 }
 
 func (vm *VM) closeUpvals(minStackIdx int) {

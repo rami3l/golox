@@ -37,15 +37,16 @@ func _() {
 	_ = x[OpJumpUnless-26]
 	_ = x[OpLoop-27]
 	_ = x[OpCall-28]
-	_ = x[OpClos-29]
-	_ = x[OpCloseUpval-30]
-	_ = x[OpClass-31]
-	_ = x[OpMethod-32]
+	_ = x[OpInvoke-29]
+	_ = x[OpClos-30]
+	_ = x[OpCloseUpval-31]
+	_ = x[OpClass-32]
+	_ = x[OpMethod-33]
 }
 
-const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpClosOpCloseUpvalOpClassOpMethod"
+const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpInvokeOpClosOpCloseUpvalOpClassOpMethod"
 
-var _OpCode_index = [...]uint8{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 136, 145, 151, 156, 161, 166, 171, 176, 181, 188, 194, 206, 212, 218, 224, 236, 243, 251}
+var _OpCode_index = [...]uint16{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 136, 145, 151, 156, 161, 166, 171, 176, 181, 188, 194, 206, 212, 218, 226, 232, 244, 251, 259}
 
 func (i OpCode) String() string {
 	if i >= OpCode(len(_OpCode_index)-1) {

@@ -303,13 +303,17 @@ func (p *Parser) argList() (argCount int) {
 func (p *Parser) dot(canAssign bool) {
 	name := p.consume(TIdent, "expect property name after '.'")
 	nameConst := p.identConst(name)
-
-	inst := OpGetProp
-	if canAssign && p.match(TEqual) {
+	switch {
+	case canAssign && p.match(TEqual):
 		p.expr()
-		inst = OpSetProp
+		p.emitBytes(byte(OpSetProp), nameConst)
+	case p.match(TLParen):
+		// OpInvoke superinstruction optimization.
+		argCount := p.argList()
+		p.emitBytes(byte(OpInvoke), nameConst, byte(argCount))
+	default:
+		p.emitBytes(byte(OpGetProp), nameConst)
 	}
-	p.emitBytes(byte(inst), nameConst)
 }
 
 func (p *Parser) expr() { p.parsePrec(PrecAssign) }

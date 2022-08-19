@@ -9,39 +9,112 @@ import (
 //go:generate stringer -type=OpCode
 type OpCode byte
 
+/* Stack effects are shown below using the Forth convention: ( before -- after ). */
 const (
+	// OpReturn() ends the current call frame, reclaims its slots,
+	// and puts the result back at the top of the stack (or returns it if top-level).
 	OpReturn OpCode = iota
+	// OpConst(idx) pushes the constant at `idx`.
+	// ( -- const )
 	OpConst
+	// OpNil() pushes a nil.
+	// ( -- nil )
 	OpNil
+	// OpTrue() pushes a true.
+	// ( -- true )
 	OpTrue
+	// OpFalse() pushes a false.
+	// ( -- false )
 	OpFalse
+	// OpPop() pops a value.
+	// ( val -- )
 	OpPop
+	// OpGetLocal(slot) pushes the local at the given `slot`.
+	// ( -- local )
 	OpGetLocal
+	// OpSetLocal(slot) sets the local at the given `slot` to `val`.
+	// ( val -- val )
 	OpSetLocal
+	// OpGetGlobal(name) pushes the global with the given `name`.
+	// ( -- global )
 	OpGetGlobal
+	// OpDefGlobal(name) defines a new global named `name` with value `val`.
+	// ( val -- )
 	OpDefGlobal
+	// OpSetGlobal(name) sets the global with the given `name` to `val`.
+	// The global must be defined with `OpDefGlobal` first.
+	// ( val -- val )
 	OpSetGlobal
+	// OpGetUpval(slot) pushes the upval at the given `slot`.
+	// ( -- upval )
 	OpGetUpval
+	// OpSetUpval(slot) sets the upval at the given `slot` to point at `val`.
+	// ( val -- val )
 	OpSetUpval
+	// OpGetProp(name) pushes the property (field/method) of `this` with the given `name`.
+	// ( this -- prop )
 	OpGetProp
+	// OpSetProp(name) sets the field of `this` to `val`.
+	// ( this val -- val )
 	OpSetProp
+	// OpEqual() tests equality.
+	// ( x y -- xEqY )
 	OpEqual
+	// OpGreater() tests "greater than".
+	// ( x y -- xGtY )
 	OpGreater
+	// OpLess() tests "less than".
+	// ( x y -- xLtY )
 	OpLess
+	// OpNot() logically negates a value.
+	// ( x -- notX )
 	OpNot
+	// OpNeg() arithmetically negates a value.
+	// ( x -- negX )
 	OpNeg
+	// OpAdd() adds 2 values.
+	// ( x y -- xAddY )
 	OpAdd
+	// OpSub() subtracts 2 values.
+	// ( x y -- xSubY )
 	OpSub
+	// OpMul() multiplies 2 values.
+	// ( x y -- xMulY )
 	OpMul
+	// OpDiv() divides 2 values.
+	// ( x y -- xDivY )
 	OpDiv
+	// OpPrint() pops and prints a value.
+	// ( val -- )
 	OpPrint
+	// OpJump(hi, lo) increments the IP by (hi<<8|lo).
+	// ( -- )
 	OpJump
+	// OpJumpUnless(hi, lo) increments the IP by (hi<<8|lo) if `val` is falsey.
+	// ( val -- val )
 	OpJumpUnless
+	// OpLoop(hi, lo) decrements the IP by (hi<<8|lo).
+	// ( -- )
 	OpLoop
+	// OpCall(argCount) calls `callee` with a argument list of length `argCount`.
+	// ( callee args...[argCount] -- res )
 	OpCall
+	// OpInvoke(name, argCount) calls the `name` method of `this` with a argument list of length `argCount`.
+	// This is a superinstruction for OpGetProp(name) + OpCall(argCount).
+	// ( this args...[argCount] -- res )
+	OpInvoke
+	// OpClos(fun, (isLocal, idx)...[fun.upvalCount]) makes a new closure
+	// out of `fun` and given `upval` (isLocal, idx) pairs.
+	// ( -- clos )
 	OpClos
+	// OpCloseUpval() closes and pops `openUpval`.
+	// ( openUpval -- )
 	OpCloseUpval
+	// OpClass(name) pushes a new class named `name`.
+	// ( -- class )
 	OpClass
+	// OpMethod(name) registers a new `method` under `class` using the given `name`.
+	// ( class method -- class )
 	OpMethod
 )
 
@@ -102,6 +175,14 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 		}
 		appendf("%-16s %4d -> %d", inst, offset,
 			offset+3+jump)
+		return res, offset + 3
+	// Binary operators.
+	case OpInvoke:
+		const_, argCount := c.code[offset+1], c.code[offset+2]
+		appendf(
+			"%-16s (%d args) %4d '%s'",
+			inst, argCount, const_, c.consts[const_],
+		)
 		return res, offset + 3
 	// Unary operators.
 	case OpConst, OpGetGlobal, OpDefGlobal, OpSetGlobal, OpGetProp, OpSetProp, OpClass, OpMethod: // `constantInstruction`
