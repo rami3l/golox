@@ -42,9 +42,9 @@ func (v VStr) String() string { return fmt.Sprintf(`"%s"`, v.Inner()) }
 
 type VFun struct {
 	name       *VStr
+	chunk      *Chunk
 	arity      int
 	upvalCount int
-	chunk      *Chunk
 }
 
 func NewVFun() *VFun { return &VFun{chunk: NewChunk()} }

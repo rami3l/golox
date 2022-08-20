@@ -6,8 +6,8 @@ import (
 )
 
 type Scanner struct {
-	start, curr, line int
 	src               []rune
+	start, curr, line int
 }
 
 func NewScanner(src string) *Scanner {
@@ -260,10 +260,10 @@ func isAlpha(c rune) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= '
 func isDigit(c rune) bool { return c >= '0' && c <= '9' }
 
 type Token struct {
-	Type TokenType
-	Line int
 	// The corresponding lexeme of this token, or the error message if Type is TErr.
 	Runes []rune
+	Type  TokenType
+	Line  int
 }
 
 func syntheticToken(ty TokenType, str string) Token {
@@ -278,7 +278,7 @@ var (
 func (t Token) String() string  { return string(t.Runes) }
 func (t Token) Eq(u Token) bool { return t.Type == u.Type && slices.Equal(t.Runes, u.Runes) }
 
-//go:generate stringer -type=TokenType
+//go:generate go run golang.org/x/tools/cmd/stringer -type=TokenType
 type TokenType int
 
 const (

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"io/ioutil"
 	"os"
 
 	e "github.com/rami3l/golox/errors"
@@ -45,7 +44,7 @@ func appMain(args []string) error {
 	case 0:
 		return vm_.REPL()
 	case 1:
-		src, err := ioutil.ReadFile(args[0])
+		src, err := os.ReadFile(args[0])
 		if err != nil {
 			return err
 		}

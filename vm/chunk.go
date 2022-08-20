@@ -6,7 +6,7 @@ import (
 	"github.com/rami3l/golox/utils"
 )
 
-//go:generate stringer -type=OpCode
+//go:generate go run golang.org/x/tools/cmd/stringer -type=OpCode
 type OpCode byte
 
 /* Stack effects are shown below using the Forth convention: ( before -- after ). */
