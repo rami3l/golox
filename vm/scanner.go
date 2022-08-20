@@ -266,6 +266,15 @@ type Token struct {
 	Runes []rune
 }
 
+func syntheticToken(ty TokenType, str string) Token {
+	return Token{Type: ty, Runes: []rune(str)}
+}
+
+var (
+	syntheticThis  = syntheticToken(TThis, "this")
+	syntheticSuper = syntheticToken(TSuper, "super")
+)
+
 func (t Token) String() string  { return string(t.Runes) }
 func (t Token) Eq(u Token) bool { return t.Type == u.Type && slices.Equal(t.Runes, u.Runes) }
 

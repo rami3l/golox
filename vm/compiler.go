@@ -48,7 +48,10 @@ type (
 		idx     int  // The index at which the actual value can be found in the VM stack.
 	}
 
-	ClassCompiler struct{ enclosing *ClassCompiler }
+	ClassCompiler struct {
+		enclosing *ClassCompiler
+		hasSuper  bool
+	}
 )
 
 type FunType int
@@ -65,8 +68,8 @@ func NewCompiler(enclosing *Compiler, funType FunType) *Compiler {
 	this := Local{}
 	if funType != FFun {
 		this = Local{
-			name:  Token{Type: TThis, Runes: []rune("this")},
-			depth: 0,
+			name:  syntheticThis,
+			depth: 0, // A sentinel depth != Uninit.
 		}
 	}
 	return &Compiler{
@@ -123,7 +126,8 @@ func (c *Compiler) addUpval(upval Upval) (idx int) {
 
 func (p *Parser) emitConst(val Value) { p.emitBytes(byte(OpConst), p.mkConst(val)) }
 
-func (p *Parser) mkConst(val Value) byte {
+// mkConst adds a new constant to the current chunk and returns its index.
+func (p *Parser) mkConst(val Value) (idx byte) {
 	const_ := p.currChunk().AddConst(val)
 	if const_ > math.MaxUint8 {
 		logrus.Panicln("too many consts in one chunk")
@@ -167,6 +171,24 @@ func (p *Parser) this(_canAssign bool) {
 		p.Error("can't use 'this' outside of a class")
 	}
 	p.var_(false)
+}
+
+func (p *Parser) super(_canAssign bool) {
+	switch {
+	case p.ClassCompiler == nil:
+		p.Error("can't use 'super' outside of a class")
+	case !p.ClassCompiler.hasSuper:
+		p.Error("can't use 'super' in a class with no superclass")
+	}
+
+	// super.method
+	p.consume(TDot, "expect '.' after 'super'")
+	method := p.consume(TIdent, "expect superclass method name")
+	methodConst := p.identConst(method)
+
+	p.namedVar(syntheticThis, false)
+	p.namedVar(syntheticSuper, false)
+	p.emitBytes(byte(OpGetSuper), methodConst)
 }
 
 func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
@@ -308,7 +330,7 @@ func (p *Parser) dot(canAssign bool) {
 		p.expr()
 		p.emitBytes(byte(OpSetProp), nameConst)
 	case p.match(TLParen):
-		// OpInvoke superinstruction optimization.
+		// Optimization: OpInvoke superinstruction.
 		argCount := p.argList()
 		p.emitBytes(byte(OpInvoke), nameConst, byte(argCount))
 	default:
@@ -553,7 +575,26 @@ func (p *Parser) classDecl() {
 	p.defVar(&nameConst)
 
 	p.wrapClassCompiler()
+	defer p.unwrapClassCompiler()
 
+	if p.match(TLess) {
+		super := p.consume(TIdent, "expect superclass name")
+		if super.Eq(*name) {
+			p.Error("a class can't inherit from itself")
+		}
+
+		// Creating a new lexical scope ensures that if we declare two classes in the same scope, each has a different local slot to store its superclass.
+		// Since we always name this variable "super", if we didn’t make a scope for each subclass, the variables would collide.
+		p.beginScope()
+		defer p.endScope()
+		p.addLocal(syntheticSuper)
+		p.defVar(nil)
+
+		p.namedVar(*super, false)
+		p.namedVar(*name, false)
+		p.emitBytes(byte(OpInherit))
+		p.ClassCompiler.hasSuper = true
+	}
 	p.namedVar(*name, false) // Push the class onto the stack for further modifications.
 	p.consume(TLBrace, "expect '{' before class body")
 	for !p.check(TRBrace) && !p.check(TEOF) {
@@ -561,8 +602,6 @@ func (p *Parser) classDecl() {
 	}
 	p.consume(TRBrace, "expect '}' after class body")
 	p.emitBytes(byte(OpPop)) // Pop off the class.
-
-	p.unwrapClassCompiler()
 }
 
 func (p *Parser) method() {
@@ -622,6 +661,7 @@ func init() {
 		TFalse:        {(*Parser).lit, nil, PrecNone},
 		TNil:          {(*Parser).lit, nil, PrecNone},
 		TOr:           {nil, (*Parser).or, PrecOr},
+		TSuper:        {(*Parser).super, nil, PrecNone},
 		TThis:         {(*Parser).this, nil, PrecNone},
 		TTrue:         {(*Parser).lit, nil, PrecNone},
 		TEOF:          {},
@@ -751,8 +791,10 @@ func (p *Parser) endCompiler() (fun *VFun, upvals []Upval) {
 	return
 }
 
-func (p *Parser) identConst(name *Token) byte { return p.mkConst(NewVStr(name.String())) }
+// identConst adds a new VStr constant (based on `name`) to the current chunk and returns its index.
+func (p *Parser) identConst(name *Token) (idx byte) { return p.mkConst(NewVStr(name.String())) }
 
+// markInit marks the latest local as initialized by saving its depth into the Local struct.
 func (p *Parser) markInit() {
 	if p.depth == 0 {
 		return
@@ -760,6 +802,7 @@ func (p *Parser) markInit() {
 	p.locals[len(p.locals)-1].depth = p.depth
 }
 
+// defVar marks the variable `global` as defined if it's global (the name of which being indicated by the given constant index), or initialized if it's local.
 func (p *Parser) defVar(global *byte) {
 	if global == nil || p.depth > 0 {
 		// Local vars. Mark it as initialized.
@@ -779,7 +822,7 @@ func (p *Parser) parseVar(errorMsg string) *byte {
 	if p.depth > 0 {
 		return nil // Local vars are not resolved using `identConst`, but stay on the stack.
 	}
-	return utils.Ref(p.identConst(target))
+	return utils.Box(p.identConst(target))
 }
 
 func (p *Parser) declVar() {

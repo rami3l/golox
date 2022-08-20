@@ -10,6 +10,7 @@ import (
 	e "github.com/rami3l/golox/errors"
 	"github.com/rami3l/golox/utils"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 )
 
@@ -252,8 +253,8 @@ func (vm *VM) run() (Value, error) {
 		case OpSetUpval:
 			slot := int(readByte())
 			upval := vm.frame().clos.upvals[slot]
-			upval.val = utils.Ref(vm.peek(0))
-			upval.idx = utils.Ref(len(vm.stack) - 1)
+			upval.val = utils.Box(vm.peek(0))
+			upval.idx = utils.Box(len(vm.stack) - 1)
 			// Don't pop, since the set operation has the RHS as its return value.
 		case OpGetProp:
 			this, ok := vm.peek(0).(*VInstance)
@@ -264,11 +265,11 @@ func (vm *VM) run() (Value, error) {
 			res, ok := this.fields[name]
 			if !ok {
 				// Fall back to method resolution.
-				method, ok := this.methods[name]
-				if !ok {
-					return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
+				bound, err := vm.bindMethod(this.VClass, name)
+				if err != nil {
+					return VNil{}, err
 				}
-				res = NewVBoundMethod(vm.peek(0), method.(*VClos))
+				res = bound
 			}
 			vm.stack[len(vm.stack)-1] = res // Replace the instance with the result.
 		case OpSetProp:
@@ -280,6 +281,14 @@ func (vm *VM) run() (Value, error) {
 			this.fields[name] = vm.peek(0) // The RHS.
 			// Pop off the instance, keep the RHS as its return value.
 			vm.stack = slices.Delete(vm.stack, len(vm.stack)-2, len(vm.stack)-1)
+		case OpGetSuper:
+			name := *readStr()
+			super := vm.pop().(*VClass)
+			bound, err := vm.bindMethod(super, name)
+			if err != nil {
+				return VNil{}, err
+			}
+			vm.stack[len(vm.stack)-1] = bound // Replace the instance with the result.
 		case OpEqual:
 			rhs := vm.pop()
 			vm.push(VEq(vm.pop(), rhs))
@@ -390,6 +399,17 @@ func (vm *VM) run() (Value, error) {
 			vm.pop()                          // Pop the hoisted upval off the stack.
 		case OpClass:
 			vm.push(NewVClass(readStr()))
+		case OpInherit:
+			super, ok := vm.peek(1).(*VClass)
+			if !ok {
+				return VNil{}, vm.MkError("superclass must be a class")
+			}
+			class := vm.peek(0).(*VClass)
+			// Optimization: Copy-down inheritance.
+			// When `class` inherits from `super`, all `super`'s methods are copied over to `class`.
+			// This is doable since Lox has "closed" classes, i.e. once a class declaration is finished executing, the set of methods for that class can never change.
+			maps.Copy(class.methods, super.methods)
+			vm.pop() // Pop the subclass.
 		case OpMethod:
 			name := *readStr()
 			method := vm.pop()
@@ -458,6 +478,16 @@ func (vm *VM) invokeFromClass(class *VClass, methodName VStr, argCount int) erro
 	return vm.call(method, argCount)
 }
 
+// bindMethod tries to create a VBoundMethod for `this.name` that binds `this`.
+// ( this -- this )
+func (vm *VM) bindMethod(class *VClass, name VStr) (bound Value, err error) {
+	method, ok := class.methods[name]
+	if !ok {
+		return VNil{}, vm.MkErrorf("undefined property '%s'", name.Inner())
+	}
+	return NewVBoundMethod(vm.peek(0), method.(*VClos)), nil
+}
+
 func (vm *VM) closeUpvals(minStackIdx int) {
 	for curr := &vm.openUpvals; *curr != nil && *(*curr).idx >= minStackIdx; *curr = (*curr).next {
 		// Thanks to Go's garbage collection, there's no need to actually save the VUpval to a "closed" field.
@@ -476,7 +506,9 @@ func (vm *VM) captureUpval(stackIdx int) (res *VUpval) {
 		return curr
 	}
 
-	res = NewVUpval(&vm.stack[stackIdx], stackIdx)
+	// ! We want to hoist vm.stack[stackIdx] to heap instead of getting its address.
+	// ! So `Box` is used instead of `&`.
+	res = NewVUpval(utils.Box(vm.stack[stackIdx]), stackIdx)
 	res.next = curr
 	if prev == nil {
 		// The iteration didn't start: vm.openUpVals had too low idx or was empty.

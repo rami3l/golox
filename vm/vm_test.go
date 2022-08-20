@@ -608,7 +608,7 @@ func TestClassNoInitArity(t *testing.T) {
 	}...)
 }
 
-func TestClassInvokeOptim(t *testing.T) {
+func TestClassInvokeOptimRegress(t *testing.T) {
 	assertEval(t, "", []TestPair{
 		{
 			heredoc.Doc(`
@@ -624,5 +624,76 @@ func TestClassInvokeOptim(t *testing.T) {
 		{"var oops = Oops();", "nil"},
 		{"oops.field();", "nil"},
 		{"oops.foo", `"bar"`},
+	}...)
+}
+
+func TestClassInheritance(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class Doughnut { cook() { return "Dunk in the fryer."; } }
+				class Cruller < Doughnut { finish() { return "Glaze with icing."; } }
+			`),
+			"nil",
+		},
+		{"Doughnut().cook()", `"Dunk in the fryer."`},
+		{"Cruller().cook()", `"Dunk in the fryer."`},
+		{"Cruller().finish()", `"Glaze with icing."`},
+	}...)
+}
+
+func TestClassInheritanceSelf(t *testing.T) {
+	assertEval(t, "a class can't inherit from itself", []TestPair{
+		{"class A < A {}", ""},
+	}...)
+}
+
+func TestClassInheritanceSuperCall(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class Duck {
+					init(name) { this.name = name; }
+					speak() { return this.name + ": Quack."; }
+				}
+				class DuckSpeaker < Duck {
+					speak() { return this.name + ": Double plus good."; }
+					speak_more() { return super.speak() + " Double plus good."; }
+				}
+			`),
+			"nil",
+		},
+		{`var jog = DuckSpeaker("Jog");`, "nil"},
+		{"jog.speak()", `"Jog: Double plus good."`},
+		{"jog.speak_more()", `"Jog: Quack. Double plus good."`},
+	}...)
+}
+
+func TestClassInheritanceSuperChainedResolution(t *testing.T) {
+	assertEval(t, "", []TestPair{
+		{
+			heredoc.Doc(`
+				class A { method() { return "A method"; } }
+				class B < A {
+                    method() { return "B method"; }
+                    test() { return super.method(); }
+                }
+				class C < B {}
+			`),
+			"nil",
+		},
+		{"C().test()", `"A method"`},
+	}...)
+}
+
+func TestBareSuper(t *testing.T) {
+	assertEval(t, "can't use 'super' outside of a class", []TestPair{
+		{"super.method();", ""},
+	}...)
+}
+
+func TestBareSuperInBaseClass(t *testing.T) {
+	assertEval(t, "can't use 'super' in a class with no superclass", []TestPair{
+		{"class A { method() { return super.method(); } }", ""},
 	}...)
 }

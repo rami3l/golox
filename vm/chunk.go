@@ -51,12 +51,15 @@ const (
 	// OpSetUpval(slot) sets the upval at the given `slot` to point at `val`.
 	// ( val -- val )
 	OpSetUpval
-	// OpGetProp(name) pushes the property (field/method) of `this` with the given `name`.
+	// OpGetProp(name) pushes the property (field/method) `this.name`.
 	// ( this -- prop )
 	OpGetProp
-	// OpSetProp(name) sets the field of `this` to `val`.
+	// OpSetProp(name) sets the field `this.name` to `val`.
 	// ( this val -- val )
 	OpSetProp
+	// OpGetSuper(name) binds the `super.name` method.
+	// ( this super -- bound )
+	OpGetSuper
 	// OpEqual() tests equality.
 	// ( x y -- xEqY )
 	OpEqual
@@ -113,6 +116,9 @@ const (
 	// OpClass(name) pushes a new class named `name`.
 	// ( -- class )
 	OpClass
+	// OpInherit() registers `super` as the superclass of `class`.
+	// ( super class -- super )
+	OpInherit
 	// OpMethod(name) registers a new `method` under `class` using the given `name`.
 	// ( class method -- class )
 	OpMethod

@@ -23,30 +23,32 @@ func _() {
 	_ = x[OpSetUpval-12]
 	_ = x[OpGetProp-13]
 	_ = x[OpSetProp-14]
-	_ = x[OpEqual-15]
-	_ = x[OpGreater-16]
-	_ = x[OpLess-17]
-	_ = x[OpNot-18]
-	_ = x[OpNeg-19]
-	_ = x[OpAdd-20]
-	_ = x[OpSub-21]
-	_ = x[OpMul-22]
-	_ = x[OpDiv-23]
-	_ = x[OpPrint-24]
-	_ = x[OpJump-25]
-	_ = x[OpJumpUnless-26]
-	_ = x[OpLoop-27]
-	_ = x[OpCall-28]
-	_ = x[OpInvoke-29]
-	_ = x[OpClos-30]
-	_ = x[OpCloseUpval-31]
-	_ = x[OpClass-32]
-	_ = x[OpMethod-33]
+	_ = x[OpGetSuper-15]
+	_ = x[OpEqual-16]
+	_ = x[OpGreater-17]
+	_ = x[OpLess-18]
+	_ = x[OpNot-19]
+	_ = x[OpNeg-20]
+	_ = x[OpAdd-21]
+	_ = x[OpSub-22]
+	_ = x[OpMul-23]
+	_ = x[OpDiv-24]
+	_ = x[OpPrint-25]
+	_ = x[OpJump-26]
+	_ = x[OpJumpUnless-27]
+	_ = x[OpLoop-28]
+	_ = x[OpCall-29]
+	_ = x[OpInvoke-30]
+	_ = x[OpClos-31]
+	_ = x[OpCloseUpval-32]
+	_ = x[OpClass-33]
+	_ = x[OpInherit-34]
+	_ = x[OpMethod-35]
 }
 
-const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpInvokeOpClosOpCloseUpvalOpClassOpMethod"
+const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpGetSuperOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpInvokeOpClosOpCloseUpvalOpClassOpInheritOpMethod"
 
-var _OpCode_index = [...]uint16{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 136, 145, 151, 156, 161, 166, 171, 176, 181, 188, 194, 206, 212, 218, 226, 232, 244, 251, 259}
+var _OpCode_index = [...]uint16{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 139, 146, 155, 161, 166, 171, 176, 181, 186, 191, 198, 204, 216, 222, 228, 236, 242, 254, 261, 270, 278}
 
 func (i OpCode) String() string {
 	if i >= OpCode(len(_OpCode_index)-1) {

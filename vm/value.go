@@ -69,7 +69,7 @@ type VUpval struct {
 	next *VUpval
 }
 
-func NewVUpval(val *Value, idx int) *VUpval { return &VUpval{val: val, idx: utils.Ref(idx)} }
+func NewVUpval(val *Value, idx int) *VUpval { return &VUpval{val: val, idx: utils.Box(idx)} }
 
 func (_ *VUpval) isValue() {}
 func (_ *VUpval) isObj()   {}
@@ -98,7 +98,7 @@ type (
 	NativeFun  = func(args ...Value) (res Value, err error)
 )
 
-func NewVNativeFun(fun NativeFun) *VNativeFun { return utils.Ref(VNativeFun(fun)) }
+func NewVNativeFun(fun NativeFun) *VNativeFun { return utils.Box(VNativeFun(fun)) }
 
 func (_ *VNativeFun) isValue()      {}
 func (_ *VNativeFun) isObj()        {}
