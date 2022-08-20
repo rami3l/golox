@@ -1,6 +1,8 @@
 # golox
 
-[The Lox Programming Language](https://www.craftinginterpreters.com/the-lox-language.html) implemented in Go, based on the original `clox` implementation.
+[The Lox Programming Language](https://www.craftinginterpreters.com/the-lox-language.html) implemented in Go, based on the original `clox` implementation\*.
+
+\* : For the tree-walking interpreter, see [`rami3l/dolores`](https://github.com/rami3l/dolores).
 
 ---
 
@@ -22,7 +24,7 @@
 - [x] Floating point arithmetic
 - [x] Logic expressions
 - [x] Control flow
-- [x] Jumps: `break`/`continue`\*
+- [x] Jumps: `break`/`continue`\*\*
 - [x] Functions
 - [x] Classes
 - [x] Instances
@@ -32,7 +34,7 @@
 - [x] Inheritance
   - [x] `super`
 
-\* : Extension
+\*\* : Extension
 
 ## Try it out!
 

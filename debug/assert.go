@@ -7,4 +7,5 @@ func Assertf(b bool, format string, a ...any) {
 		panic(fmt.Sprintf(format, a...))
 	}
 }
+
 func AssertEq[T comparable](expected, got T) { Assertf(expected == got, "%v != %v", expected, got) }
