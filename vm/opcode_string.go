@@ -39,16 +39,17 @@ func _() {
 	_ = x[OpLoop-28]
 	_ = x[OpCall-29]
 	_ = x[OpInvoke-30]
-	_ = x[OpClos-31]
-	_ = x[OpCloseUpval-32]
-	_ = x[OpClass-33]
-	_ = x[OpInherit-34]
-	_ = x[OpMethod-35]
+	_ = x[OpSuperInvoke-31]
+	_ = x[OpClos-32]
+	_ = x[OpCloseUpval-33]
+	_ = x[OpClass-34]
+	_ = x[OpInherit-35]
+	_ = x[OpMethod-36]
 }
 
-const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpGetSuperOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpInvokeOpClosOpCloseUpvalOpClassOpInheritOpMethod"
+const _OpCode_name = "OpReturnOpConstOpNilOpTrueOpFalseOpPopOpGetLocalOpSetLocalOpGetGlobalOpDefGlobalOpSetGlobalOpGetUpvalOpSetUpvalOpGetPropOpSetPropOpGetSuperOpEqualOpGreaterOpLessOpNotOpNegOpAddOpSubOpMulOpDivOpPrintOpJumpOpJumpUnlessOpLoopOpCallOpInvokeOpSuperInvokeOpClosOpCloseUpvalOpClassOpInheritOpMethod"
 
-var _OpCode_index = [...]uint16{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 139, 146, 155, 161, 166, 171, 176, 181, 186, 191, 198, 204, 216, 222, 228, 236, 242, 254, 261, 270, 278}
+var _OpCode_index = [...]uint16{0, 8, 15, 20, 26, 33, 38, 48, 58, 69, 80, 91, 101, 111, 120, 129, 139, 146, 155, 161, 166, 171, 176, 181, 186, 191, 198, 204, 216, 222, 228, 236, 249, 255, 267, 274, 283, 291}
 
 func (i OpCode) String() string {
 	if i >= OpCode(len(_OpCode_index)-1) {

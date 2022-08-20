@@ -380,6 +380,13 @@ func (vm *VM) run() (Value, error) {
 			if err := vm.invokeFromClass(this.VClass, name, argCount); err != nil {
 				return VNil{}, err
 			}
+		case OpSuperInvoke:
+			method := *readStr()
+			argCount := int(readByte())
+			super := vm.pop().(*VClass)
+			if err := vm.invokeFromClass(super, method, argCount); err != nil {
+				return VNil{}, err
+			}
 		case OpClos:
 			fun := readConst().(*VFun)
 			clos := NewVClos(fun)
@@ -470,6 +477,8 @@ func (vm *VM) callClos(clos *VClos, argCount int) error {
 	return nil
 }
 
+// invokeFromClass invokes the `class.methodName` method.
+// ( callee args...[argCount] -- res )
 func (vm *VM) invokeFromClass(class *VClass, methodName VStr, argCount int) error {
 	method, ok := class.methods[methodName]
 	if !ok {

@@ -106,6 +106,10 @@ const (
 	// This is a superinstruction for OpGetProp(name) + OpCall(argCount).
 	// ( this args...[argCount] -- res )
 	OpInvoke
+	// OpSuperInvoke(name, argCount) calls the `name` method of `super` with a argument list of length `argCount`.
+	// This is an inexact superinstruction for OpGetSuper(name) + OpCall(argCount).
+	// ( this args...[argCount] super -- res )
+	OpSuperInvoke
 	// OpClos(fun, (isLocal, idx)...[fun.upvalCount]) makes a new closure
 	// out of `fun` and given `upval` (isLocal, idx) pairs.
 	// ( -- clos )
@@ -183,7 +187,7 @@ func (c *Chunk) DisassembleInst(offset int) (res string, newOffset int) {
 			offset+3+jump)
 		return res, offset + 3
 	// Binary operators.
-	case OpInvoke:
+	case OpInvoke, OpSuperInvoke: // `invokeInstruction`
 		const_, argCount := c.code[offset+1], c.code[offset+2]
 		appendf(
 			"%-16s (%d args) %4d '%s'",

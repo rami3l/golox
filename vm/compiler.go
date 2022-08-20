@@ -187,8 +187,18 @@ func (p *Parser) super(_canAssign bool) {
 	methodConst := p.identConst(method)
 
 	p.namedVar(syntheticThis, false)
-	p.namedVar(syntheticSuper, false)
-	p.emitBytes(byte(OpGetSuper), methodConst)
+	if p.match(TLParen) {
+		// Optimization: OpSuperInvoke superinstruction.
+		// We're heap allocating an ObjBoundMethod for each super call,
+		// even though most of the time the very next instruction is an OpCall
+		// that immediately unpacks that bound method, invokes and then discards it.
+		argCount := p.argList()
+		p.namedVar(syntheticSuper, false)
+		p.emitBytes(byte(OpSuperInvoke), methodConst, byte(argCount))
+	} else {
+		p.namedVar(syntheticSuper, false)
+		p.emitBytes(byte(OpGetSuper), methodConst)
+	}
 }
 
 func (p *Parser) var_(canAssign bool) { p.namedVar(p.prev, canAssign) }
@@ -534,7 +544,7 @@ func (p *Parser) fun_(ty FunType) {
 	p.block()
 
 	// Because we end Compiler completely when we reach the end of the function body,
-	// there’s no need to close the lingering outermost scope
+	// there's no need to close the lingering outermost scope
 	fun, upvals := p.endCompiler()
 	p.emitBytes(byte(OpClos), p.mkConst(fun))
 	debug.AssertEq(len(upvals), fun.upvalCount)
@@ -584,7 +594,7 @@ func (p *Parser) classDecl() {
 		}
 
 		// Creating a new lexical scope ensures that if we declare two classes in the same scope, each has a different local slot to store its superclass.
-		// Since we always name this variable "super", if we didn’t make a scope for each subclass, the variables would collide.
+		// Since we always name this variable "super", if we didn't make a scope for each subclass, the variables would collide.
 		p.beginScope()
 		defer p.endScope()
 		p.addLocal(syntheticSuper)
