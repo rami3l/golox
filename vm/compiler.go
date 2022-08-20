@@ -17,11 +17,9 @@ type Parser struct {
 	*Scanner
 	*Compiler
 	ClassCompiler *ClassCompiler
+	errors        *multierror.Error
 	prev, curr    Token
-
-	errors *multierror.Error
-	// Whether the parser is trying to sync, i.e. in the error recovery process.
-	panicMode bool
+	panicMode     bool // Whether the parser is in error recovery and trying to sync.
 }
 
 func NewParser() *Parser { return &Parser{} }
@@ -30,12 +28,12 @@ type (
 	Compiler struct {
 		enclosing    *Compiler
 		fun          *VFun
-		funType      FunType
+		loopStart    *int
 		locals       []Local
 		upvals       []Upval
-		depth        int
-		loopStart    *int
 		loopEndHoles []int
+		funType      FunType
+		depth        int
 	}
 
 	Local struct {
@@ -56,7 +54,7 @@ type (
 
 type FunType int
 
-//go:generate stringer -type=FunType
+//go:generate go run golang.org/x/tools/cmd/stringer -type=FunType
 const (
 	FFun FunType = iota
 	FInit
@@ -866,7 +864,6 @@ func (p *Parser) endLoop() {
 
 	p.loopStart = nil
 	p.loopEndHoles = p.loopEndHoles[:0]
-	return
 }
 
 func (c *Compiler) isInLoop() bool { return c.loopStart != nil }
@@ -952,7 +949,7 @@ func (p *Parser) emitLoop(start int) {
 
 /* Precedence */
 
-//go:generate stringer -type=Prec
+//go:generate go run golang.org/x/tools/cmd/stringer -type=Prec
 type Prec int
 
 const (

@@ -5,8 +5,8 @@ import (
 )
 
 type CompilationError struct {
-	Line   int
 	Reason string
+	Line   int
 }
 
 func (e *CompilationError) Error() string {
@@ -14,8 +14,8 @@ func (e *CompilationError) Error() string {
 }
 
 type RuntimeError struct {
-	Line   int
 	Reason string
+	Line   int
 }
 
 func (e *RuntimeError) Error() string {

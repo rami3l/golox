@@ -15,13 +15,10 @@ import (
 )
 
 type VM struct {
-	stack []Value
-	// The call stack.
-	frames  []CallFrame
-	globals map[VStr]Value
-
-	// The head pointer of an intrusive linked list of open VUpvals, required for escape analysis.
-	openUpvals *VUpval
+	globals    map[VStr]Value
+	openUpvals *VUpval // The head of a linked list of open VUpvals for escape analysis.
+	stack      []Value
+	frames     []CallFrame // The call stack.
 }
 
 func NewVM() *VM {
