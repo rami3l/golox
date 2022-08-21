@@ -24,7 +24,7 @@
 - [x] Floating point arithmetic
 - [x] Logic expressions
 - [x] Control flow
-- [x] Jumps: `break`/`continue`\*\*
+  - [x] Jumps: `break`/`continue`\*\*
 - [x] Functions
 - [x] Classes
 - [x] Instances
@@ -55,5 +55,5 @@ go run main.go
 To run with debug info:
 
 ```sh
-go generate ./... && go run -tags DEBUG main.go -v=debug
+go run -tags DEBUG main.go -v=debug
 ```
