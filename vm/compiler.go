@@ -638,12 +638,13 @@ func (p *Parser) decl() {
 	}
 }
 
-type ParseFn = func(p *Parser, canAssign bool)
-
-type ParseRule struct {
-	Prefix, Infix ParseFn
-	Prec
-}
+type (
+	ParseRule struct {
+		Prefix, Infix ParseFn
+		Prec
+	}
+	ParseFn = func(p *Parser, canAssign bool)
+)
 
 var parseRules []ParseRule
 
@@ -981,9 +982,8 @@ func (p *Parser) sync() {
 }
 
 func (p *Parser) ErrorAt(tk Token, reason string) {
-	// Don't collect error when we're syncing.
 	if p.panicMode {
-		return
+		return // Don't collect error when we're syncing.
 	}
 	p.panicMode = true
 
